@@ -25,10 +25,7 @@ class Agent {
     if (!storageProvider) {
       throw new Error("Storage provider is required");
     }
-    this.chain =
-      chain === "gnosis" || chain?.name?.toLowerCase() === "gnosis"
-        ? gnosis
-        : sepolia;
+    this.chain = chain?.name?.toLowerCase() === "gnosis" ? gnosis : sepolia;
     this.pimlicoAPIKey = pimlicoAPIKey;
     this.storageProvider = storageProvider;
     this.viemAccount = viemAccount;
@@ -142,7 +139,7 @@ class Agent {
             verifiers.portalDecryptionKeyVerifier,
             verifiers.memberEncryptionKeyVerifer,
             verifiers.memberDecryptionKeyVerifer,
-          ],  
+          ],
         }]
       });
       const receipt = await this.smartAccountClient.waitForUserOperationReceipt({
@@ -167,10 +164,10 @@ class Agent {
         portalKeys,
         verifiers,
       };
-      
+
       // Set portal data
       this.portal = portalData;
-      
+
       fs.writeFileSync(
         `creds/${this.namespace}.json`,
         JSON.stringify(portalData, null, 2)
