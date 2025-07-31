@@ -142,7 +142,7 @@ class Agent {
             verifiers.portalDecryptionKeyVerifier,
             verifiers.memberEncryptionKeyVerifer,
             verifiers.memberDecryptionKeyVerifer,
-          ],  
+          ],
         }]
       });
       const receipt = await this.smartAccountClient.waitForUserOperationReceipt({
@@ -167,10 +167,10 @@ class Agent {
         portalKeys,
         verifiers,
       };
-      
+
       // Set portal data
       this.portal = portalData;
-      
+
       fs.writeFileSync(
         `creds/${this.namespace}.json`,
         JSON.stringify(portalData, null, 2)
