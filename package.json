@@ -23,13 +23,15 @@
   "license": "MIT",
   "dependencies": {
     "@ethersphere/bee-js": "^9.0.2",
+    "@nucypher/taco": "0.6.0",
+    "@nucypher/taco-auth": "0.3.0",
     "@ucans/ucans": "^0.12.0",
     "crypto": "^1.0.1",
-    "dotenv": "^16.4.7",
+    "dotenv": "^16.6.1",
     "figlet": "^1.8.0",
     "js-base64": "^3.7.7",
     "permissionless": "^0.2.28",
-    "pinata-web3": "^0.5.4",
+    "pinata": "^2.4.9",
     "viem": "^2.22.10",
     "yargs": "^17.7.2"
   },
