@@ -7,6 +7,10 @@ class BaseStorageProvider {
     throw new Error('Method not implemented');
   }
 
+  async downloadBytes(reference) {
+    throw new Error('Method not implemented');
+  }
+
   async unpin(reference) {
     throw new Error('Method not implemented');
   }
