@@ -16,6 +16,7 @@ import fs from "fs";
 // Services
 import { ValidationService } from "../services/ValidationService.js";
 
+
 /**
  * Fileverse Agent - A comprehensive file management system with optional encryption
  *
@@ -36,62 +37,89 @@ class Agent {
   DELETED_HASH = "deleted";
   constructor({ chain, viemAccount, pimlicoAPIKey, storageProvider, taco }) {
     // Validate all input parameters
+    console.debug('🚀 Initializing Fileverse Agent...');
+    console.debug('Agent configuration:', {
+      chain: typeof chain === 'string' ? chain : chain?.name,
+      accountAddress: viemAccount?.address,
+      hasPimlicoAPIKey: !!pimlicoAPIKey,
+      storageProvider: storageProvider?.constructor?.name || 'Unknown',
+      hasTacoConfig: !!taco
+    });
+    
     ValidationService.validateAgentConfig({
       chain,
       viemAccount,
       pimlicoAPIKey,
       storageProvider,
     });
+    console.debug('✅ Agent configuration validated');
 
     // Store TACo config for potential TacoEncryption creation
     this.tacoConfig = taco;
+    if (taco) {
+      console.debug('🔐 TACo configuration provided:', {
+        domain: taco.domain,
+        ritualId: taco.ritualId,
+        hasViemClient: !!taco.viemClient
+      });
+    }
 
     // Set core properties
     this.chain =
       chain === "gnosis" || chain?.name?.toLowerCase() === "gnosis"
         ? gnosis
         : sepolia;
+    console.debug(`🔗 Chain selected: ${this.chain.name} (ID: ${this.chain.id})`);
+    
     this.pimlicoAPIKey = pimlicoAPIKey;
     this.storageProvider = storageProvider;
     this.viemAccount = viemAccount;
+    console.debug(`📁 Storage provider: ${storageProvider?.constructor?.name}`);
 
     // Generate clients
+    console.debug('🔧 Generating blockchain clients...');
     const clients = this.generateClients();
     this.publicClient = clients.publicClient;
     this.walletClient = clients.walletClient;
+    console.debug('✅ Blockchain clients generated');
 
     // Set portal registry based on chain
     this.portalRegistry = this.setPortalRegistry();
+    console.debug(`📜 Portal registry: ${this.portalRegistry}`);
 
     this.owner = this.viemAccount.address;
+    console.debug(`✅ Agent initialized for address: ${this.owner}`);
   }
 
   /**
-   * Get or create TacoEncryption instance when TACo configuration is available
+   * Get or create TacoService instance when TACo configuration is available
    * @private
    */
-  async _getTacoEncryption() {
+  async _getTacoService() {
     if (!this.tacoConfig) {
       return null;
     }
 
-    if (!this._tacoEncryption) {
-      // Import TacoEncryption dynamically to avoid circular imports
-      const { TacoEncryption } = await import("./TacoEncryption.js");
-      this._tacoEncryption = new TacoEncryption({
-        taco: this.tacoConfig,
-        agent: this,
+    if (!this._tacoService) {
+      // Import TacoService
+      const { TacoService } = await import("../services/TacoService.js");
+
+      this._tacoService = new TacoService({
+        ritualId: this.tacoConfig.ritualId,
+        domain: this.tacoConfig.domain,
+        viemClient: this.tacoConfig.viemClient || this.publicClient, // Use TACo-specific client if provided
+        viemAccount: this.viemAccount, // Use Agent's viem account
       });
 
       // Initialize TACo service
       try {
-        await this._tacoEncryption.initializeTaco();
+        await this._tacoService.initialize();
       } catch (error) {
-        console.warn("Failed to initialize TACo:", error.message);
+        console.warn('⚠️ Failed to initialize TACo:', error.message);
       }
     }
 
-    return this._tacoEncryption;
+    return this._tacoService;
   }
 
   /**
@@ -99,7 +127,9 @@ class Agent {
    * @returns {Promise<object>} Smart account client instance
    */
   async setupSafe() {
-    const pimlicoRpcUrl = `https://api.pimlico.io/v2/${this.chain.name.toLowerCase()}/rpc?apikey=${this.pimlicoAPIKey}`;
+    const pimlicoRpcUrl = `https://api.pimlico.io/v2/${this.chain.name.toLowerCase()}/rpc?apikey=${
+      this.pimlicoAPIKey
+    }`;
     const paymasterClient = createPimlicoClient({
       transport: http(pimlicoRpcUrl),
       entryPoint: {
@@ -180,7 +210,7 @@ class Agent {
     try {
       const storage = await this.loadStorage(this.namespace);
       if (storage && storage.namespace === this.namespace) {
-        console.log("Storage already exists");
+        console.debug(`🔍 Storage already exists for namespace: ${namespace}`);
         this.portal = storage;
         return storage.portalAddress;
       }
@@ -246,7 +276,7 @@ class Agent {
       );
       return portalAddress;
     } catch (error) {
-      console.error("Error deploying portal:", error);
+      console.error('❌ Error deploying portal:', error.message);
       throw error;
     }
   }
@@ -273,20 +303,20 @@ class Agent {
    * @returns {Promise<boolean>} True if TACo was initialized, false if no config
    */
   async initializeTaco() {
-    const tacoEncryption = await this._getTacoEncryption();
-    if (tacoEncryption) {
-      await tacoEncryption.initializeTaco();
+    const tacoService = await this._getTacoService();
+    if (tacoService) {
+      await tacoService.initialize();
       return true;
     }
     return false;
   }
 
   /**
-   * Create a new file (public or encrypted based on accessConditions)
+   * Create a new file (public or encrypted based on a composite or a simple accessCondition)
    *
    * @param {string|object} output - The file content (string for text, object for JSON)
    * @param {object} options - Configuration options
-   * @param {object} [options.accessConditions] - TACo access conditions for encryption
+   * @param {object} [options.accessCondition] - TACo access condition for encryption. It could be a composite or a simple access condition.
    * @returns {Promise<object>} File creation result with fileId, hash, encrypted status
    * @throws {Error} If validation fails
    *
@@ -297,7 +327,7 @@ class Agent {
    * @example
    * // Create encrypted file with time-based access condition (requires TACo config)
    * const result = await agent.create('Secret content', {
-   *   accessConditions: {
+   *   accessCondition: {
    *     type: 'time',
    *     returnValueTest: {
    *       comparator: '>=',
@@ -326,23 +356,24 @@ class Agent {
     let tacoRitualId = null;
     let filetype = 0; // 0 = PUBLIC
 
-    // Handle encryption if accessConditions are provided
-    if (options.accessConditions) {
-      const tacoEncryption = await this._getTacoEncryption();
-      if (!tacoEncryption) {
+    // Handle encryption if accessCondition is provided
+    if (options.accessCondition) {
+      const tacoService = await this._getTacoService();
+      if (!tacoService) {
         throw new Error(
-          "Access conditions provided but TACo is not configured. TACo configuration is required for encrypted file operations."
+          "Access condition provided but TACo is not configured. TACo configuration is required for encrypted file operations."
         );
       }
 
-      // Encrypt the content
-      contentToUpload = await tacoEncryption.encryptContent(
+      // Encrypt the content using native TACo condition
+      const messageKit = await tacoService.encrypt(
         output,
-        options.accessConditions
+        options.accessCondition
       );
+      contentToUpload = messageKit.toBytes();
       filename = "encrypted_content.bin";
       isEncrypted = true;
-      tacoRitualId = tacoEncryption.tacoConfig.ritualId;
+      tacoRitualId = tacoService.ritualId;
       filetype = 1; // 1 = ENCRYPTED
     }
 
@@ -394,6 +425,7 @@ class Agent {
     const receipt = await this.smartAccountClient.waitForUserOperationReceipt({
       hash,
     });
+
     const logs = parseEventLogs({
       abi: PortalABI,
       logs: receipt.logs,
@@ -414,9 +446,9 @@ class Agent {
       encrypted: isEncrypted,
     };
 
-    // Add accessConditions to return object if encrypted
+    // Add the accessCondition to the return object if encrypted
     if (isEncrypted) {
-      transaction.accessConditions = options.accessConditions;
+      transaction.accessCondition = options.accessCondition;
     }
 
     return transaction;
@@ -455,7 +487,7 @@ class Agent {
         try {
           metadata = JSON.parse(metadataContent);
         } catch (parseError) {
-          console.warn("Could not parse string as JSON metadata:", parseError);
+          console.warn(`⚠️ Could not parse metadata as JSON for file ${fileId}:`, parseError.message);
           metadata = {};
         }
       } else {
@@ -463,7 +495,7 @@ class Agent {
         metadata = metadataContent || {};
       }
     } catch (error) {
-      console.warn("Could not retrieve metadata:", error);
+      console.warn(`⚠️ Could not retrieve metadata for file ${fileId}:`, error.message);
       metadata = {};
     }
 
@@ -479,22 +511,28 @@ class Agent {
     return fileInfo;
   }
 
-  async getFileContent(fileId, signer = undefined) {
+  /**
+   * Get file metadata and content by ID, with automatic decryption for encrypted files
+   * @param {string|number|bigint} fileId - The file ID to retrieve
+   * @param {Object} viemAccount - Optional custom viem account for decryption (for encrypted files only)
+   * @returns {Promise<object>} File information with content
+   */
+  async getFileContent(fileId, viemAccount = undefined) {
     ValidationService.validateFileId(fileId);
     const fileInfo = await this.getFile(fileId);
 
-    // Use TacoEncryption for encrypted files
+    // Use TacoService for encrypted files
     if (fileInfo.metadata.encrypted) {
-      const tacoEncryption = await this._getTacoEncryption();
-      if (tacoEncryption) {
+      const tacoService = await this._getTacoService();
+      if (tacoService) {
         // Download encrypted bytes and decrypt
         const encryptedBytes = await this.storageProvider.downloadBytes(
           fileInfo.contentIpfsHash
         );
-        const decryptedContent = await tacoEncryption.decryptContent(
-          encryptedBytes,
-          signer
-        );
+        
+        // Decrypt with automatic condition context creation
+        // Use custom viem account if provided, otherwise TacoService uses Agent's configured account
+        const decryptedContent = await tacoService.decryptWithAutoContext(encryptedBytes, viemAccount);
 
         return {
           ...fileInfo,
@@ -502,9 +540,7 @@ class Agent {
           decrypted: true,
         };
       } else {
-        console.warn(
-          "Encrypted file detected but TACo is not configured. Cannot decrypt."
-        );
+        console.warn(`⚠️ Encrypted file ${fileId} detected but TACo not configured`);
         throw new Error(
           "Cannot decrypt encrypted file. TACo configuration required for encrypted file operations."
         );
@@ -585,7 +621,7 @@ class Agent {
       await this.storageProvider.unpin(metadataIpfsHash);
       await this.storageProvider.unpin(contentIpfsHash);
     } catch (error) {
-      console.error("Error unpinning file from storage:", error);
+      console.error('❌ Error unpinning file from storage:', error.message);
     }
 
     const transaction = {
@@ -634,7 +670,7 @@ class Agent {
         await this.storageProvider.unpin(metadataIpfsHash);
         await this.storageProvider.unpin(contentIpfsHash);
       } catch (error) {
-        console.error("Error unpinning file from storage:", error);
+        console.error('❌ Error unpinning file from storage during delete:', error.message);
       }
 
       const transaction = {
@@ -644,11 +680,10 @@ class Agent {
       };
       return transaction;
     } catch (error) {
-      console.error("Error deleting file:", error);
+      console.error(`❌ Error deleting file ${fileId}:`, error.message);
       throw new Error("File deletion failed.");
     }
   }
 }
 
 export { Agent };
-export { TacoEncryption } from "./TacoEncryption.js";

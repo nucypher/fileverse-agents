@@ -1,288 +1,357 @@
 /**
- * TACo (Threshold Access Control) Service
- * Handles TACo encryption/decryption and condition management
+ * TACo Service with Published Package Compatibility
+ * Uses the new temporary published TACo packages with native viem support
  */
 
-import { TACO_CONFIG, ERROR_MESSAGES } from "../config/constants.js";
+import { ERROR_MESSAGES } from "../config/constants.js";
 
-// TACo imports will be loaded dynamically
-let taco, tacoAuth, initialize, conditions, encrypt, decrypt, domains, ThresholdMessageKit, EIP4361AuthProvider, USER_ADDRESS_PARAM_DEFAULT;
+// TACo functions - loaded via dynamic import for browser and Node.js compatibility
+// TODO: investigate the es/commonjs compatibility issue between the agent and taco-web and resolve it to use static imports like:
+// import { encryptWithViem, decryptWithViem, initialize, conditions, domains } from "@nucypher/taco";
+// For now, the dynamic import is used to load the TACo functions
+let encryptWithViem, decryptWithViem, initialize, conditions, domains;
+
+// TACo Auth functions with viem support - loaded via dynamic import
+let tacoAuthModules;
 
 export class TacoService {
-  constructor(config) {
-    this.config = {
-      ritualId: config.ritualId,
-      domain: config.domain || TACO_CONFIG.DEFAULT_DOMAIN,
-      provider: config.provider,
-      signer: config.signer,
-      isInitialized: false,
-      networkError: null,
-    };
+  constructor({ ritualId, domain, viemClient, viemAccount }) {
+    // Validate required parameters
+    if (!ritualId || ritualId <= 0) {
+      throw new Error("Valid ritual ID is required for TACo initialization");
+    }
+    if (!domain) {
+      throw new Error("TACo domain is required");
+    }
+    if (!viemClient) {
+      throw new Error("Viem client is required for TACo operations");
+    }
+    if (!viemAccount) {
+      throw new Error("Viem account is required for TACo operations");
+    }
+
+    this.viemClient = viemClient;
+    this.viemAccount = viemAccount;
+    this.ritualId = ritualId;
+    this.domain = domain;
+    this.initialized = false;
+
+    console.debug(`🔧 TACo Configuration:`);    
+    console.debug(`   Domain: ${this.domain}`);
+    console.debug(`   Ritual ID: ${this.ritualId}`);
+    console.debug(`   Chain ID: ${this.getChainId()}`);
+    console.debug(`   Has Viem Client: ${!!this.viemClient}`);
+    console.debug(`   Has Viem Account: ${!!this.viemAccount}`);
+    console.debug(`   Account Address: ${this.viemAccount?.address || "N/A"}`);
   }
 
   /**
-   * Initialize TACo with dynamic imports
+   * Initialize TACo functions via createRequire (reliable with local packages)
+   */
+  static async initializeTaco() {
+    if (encryptWithViem && decryptWithViem) {
+      return; // Already initialized
+    }
+
+    try {
+      console.debug('Initializing TACo modules');
+
+      let TACo;
+      // Environment detection: use createRequire in Node.js, dynamic import in browser
+      if (typeof window === "undefined" && process?.versions?.node) {
+        // Node.js environment - use createRequire for local linked packages
+        const { createRequire } = await import("module");
+        const require = createRequire(import.meta.url);
+        TACo = require("@nucypher/taco");
+        console.debug('TACo loaded via require (Node.js environment)');
+      } else {
+        // Browser environment - use dynamic import
+        TACo = await import("@nucypher/taco");
+        console.debug('TACo loaded via dynamic import (Browser environment)');
+      }
+
+      // Extract functions from the imported module
+      ({ encryptWithViem, decryptWithViem, initialize, conditions, domains } =
+        TACo);
+
+      // Load TACo Auth modules with viem support
+      let TacoAuth;
+      if (typeof window === "undefined" && process?.versions?.node) {
+        // Node.js environment
+        const { createRequire } = await import("module");
+        const require = createRequire(import.meta.url);
+        TacoAuth = require("@nucypher/taco-auth");
+        console.debug('TACo Auth loaded via require (Node.js environment)');
+      } else {
+        // Browser environment
+        TacoAuth = await import("@nucypher/taco-auth");
+        console.debug('TACo Auth loaded via dynamic import (Browser environment)');
+      }
+
+      // Store auth modules for later use
+      tacoAuthModules = TacoAuth;
+
+      // Log available functions for debugging
+      console.debug('Available TACo functions', {
+        encryptWithViem: !!encryptWithViem,
+        decryptWithViem: !!decryptWithViem,
+        initialize: !!initialize,
+        conditions: !!conditions,
+        domains: !!domains
+      });
+      
+      // Debug domain structure
+      if (domains) {
+        console.debug('Available TACo domains:', Object.keys(domains));
+      }
+
+      if (!encryptWithViem || !decryptWithViem) {
+        throw new Error(
+          "TACo viem functions (encryptWithViem/decryptWithViem) not available. " +
+            "The npm version (@nucypher/taco v0.6.0) doesn't include viem support. " +
+            "Please use a newer version once available or build from the GitHub branch with viem support."
+        );
+      }
+
+      console.debug('TACo initialization successful');
+    } catch (error) {
+      console.error('❌ TACo initialization failed:', error.message);
+      console.debug('Error details:', {
+        domain: this.domain,
+        ritualId: this.ritualId,
+        chainId: this.getChainId(),
+        hasViemClient: !!this.viemClient,
+        hasViemAccount: !!this.viemAccount,
+        stack: error.stack
+      });
+      throw new Error(`Failed to initialize TACo: ${error.message}`);
+    }
+  }
+
+  /**
+   * Initialize TACo instance (public method for explicit initialization)
    */
   async initialize() {
-    if (!this.config) {
-      throw new Error(ERROR_MESSAGES.TACO_CONFIG_MISSING);
-    }
+    await this._ensureInitialized();
+  }
 
+  /**
+   * Private method to ensure TACo is fully initialized (modules + domains)
+   * Handles both static module loading and instance domain initialization
+   */
+  async _ensureInitialized() {
     try {
-      await this._loadTacoModules();
-      await this._validateNetwork();
-      await this._initializeTaco();
+      // Step 1: Ensure TACo modules are loaded (static)
+      await TacoService.initializeTaco();
 
-      this.config.isInitialized = true;
-      this.config.networkError = null;
+      // Step 2: Ensure TACo domains are initialized for this instance
+      if (!this.initialized) {
+        console.debug('🔗 Initializing TACo domains...');
+        await initialize();
+        this.initialized = true;
 
-      console.log(
-        `TACo initialized successfully on network ${await this._getChainId()} with ritual ${
-          this.config.ritualId
-        }`
-      );
+        // Validate domain exists and log appropriately
+        if (domains && domains[this.domain]) {
+          const chainId = domains[this.domain].CHAIN_ID || domains[this.domain].chainId || 'Unknown';
+          console.debug(`✅ TACo domains initialized: ${this.domain} (Chain: ${chainId})`);
+        } else {
+          console.debug(`✅ TACo domains initialized for: ${this.domain}`);
+          console.warn(`⚠️ Domain ${this.domain} not found in domains object`);
+          if (domains) {
+            console.debug('Available domains:', Object.keys(domains));
+          }
+        }
+      }
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.warn("TACo initialization failed:", errorMessage);
+        error.message ||
+        'Unknown error occurred during TACo initialization';
 
-      this.config.isInitialized = false;
-      this.config.networkError = errorMessage;
+      console.error('❌ TACo initialization failed:', errorMessage);
+      console.debug('TACo initialization error details:', {
+        domain: this.domain,
+        ritualId: this.ritualId,
+        chainId: this.getChainId(),
+        originalError: error?.message,
+        stack: error?.stack
+      });
 
-      if (errorMessage.includes("Failed to import TACo dependencies")) {
-        throw error;
-      }
+      this.initialized = false;
+
+      throw new Error(`TACo initialization failed: ${errorMessage}`, { cause: error });
     }
   }
 
   /**
-   * Create condition from configuration
+   * Encrypt data using the published TACo viem integration
+   * Matches the exact signature: encryptWithViem(viemPublicClient, domain, message, condition, ritualId, viemAuthSigner)
    */
-  async createCondition(conditionConfig) {
-    this._validateConditionConfig(conditionConfig);
-
-    if (!conditions) {
-      throw new Error(
-        "TACo conditions not available. Ensure TACo is properly initialized."
-      );
-    }
-
-    const { type, ...params } = conditionConfig;
-
+  async encrypt(data, accessCondition) {
     try {
-      switch (type.toLowerCase()) {
-        case "contract":
-          this._validateContractConditionParams(params);
-          return new conditions.base.contract.ContractCondition(params);
-        case "time":
-          this._validateTimeConditionParams(params);
-          return new conditions.base.time.TimeCondition(params);
-        case "rpc":
-          this._validateRpcConditionParams(params);
-          return new conditions.base.rpc.RpcCondition(params);
-        default:
-          throw new Error(
-            `Unsupported condition type: ${type}. Supported types: contract, time, rpc`
-          );
+      // Ensure TACo is fully initialized (modules + domains)
+      await this._ensureInitialized();
+
+      console.debug(`🔐 Starting TACo encryption for domain ${this.domain}, ritual ${this.ritualId}`);
+
+      // Convert data to appropriate format
+      const message = typeof data === "string" ? data : new Uint8Array(data);
+
+      // Create access conditions using TACo conditions API
+      if (!accessCondition.chain) {
+        accessCondition.chain = this.getChainId();
       }
-    } catch (error) {
-      throw new Error(`Failed to create ${type} condition: ${error.message}`);
-    }
-  }
-
-  /**
-   * Encrypt content with TACo
-   */
-  async encryptContent(content, accessConditions) {
-    if (!this.isInitialized()) {
-      throw new Error(ERROR_MESSAGES.TACO_NOT_INITIALIZED);
-    }
-
-    try {
-      const message =
-        typeof content === "string"
-          ? new TextEncoder().encode(content)
-          : content;
-      const messageKit = await encrypt(
-        this.config.provider,
-        this.config.domain,
-        message,
-        accessConditions,
-        this.config.ritualId,
-        this.config.signer
+      // Use the published package's encryptWithViem function directly
+      // Signature: encryptWithViem(viemPublicClient, domain, message, condition, ritualId, viemAuthSigner)
+      const messageKit = await encryptWithViem(
+        this.viemClient, // viemPublicClient
+        this.domain, // domain
+        message, // message (string or Uint8Array)
+        accessCondition, // condition
+        this.ritualId, // ritualId
+        this.viemAccount // viemAuthSigner
       );
+
+      console.debug('✅ TACo encryption successful');
       return messageKit;
     } catch (error) {
-      throw new Error(`TACo encryption failed: ${error.message}`);
+      console.error('❌ TACo encryption failed:', error.message);
+      console.debug('Encryption error context:', {
+        domain: this.domain,
+        ritualId: this.ritualId,
+        hasViemClient: !!this.viemClient,
+        hasViemAccount: !!this.viemAccount,
+        accountAddress: this.viemAccount?.address || 'N/A',
+        dataType: typeof data,
+        hasAccessCondition: !!accessCondition
+      });
+      throw new Error(`TACo encryption failed: ${error.message}`, { cause: error });
     }
   }
 
   /**
-   * Decrypt content with TACo
+   * Create condition context with authentication for decryption using viem
+   * @param {Object} messageKit - The encrypted message kit
+   * @param {Object} customViemAccount - Optional custom viem account for authentication
+   * @returns {Object} ConditionContext with authentication providers
    */
-  async decryptContent(encryptedData, signer) {
-    if (!this.isInitialized()) {
-      throw new Error(ERROR_MESSAGES.TACO_NOT_INITIALIZED);
-    }
-
+  async createConditionContext(messageKit, customViemAccount = null) {
     try {
-      const messageKitFromBytes = ThresholdMessageKit.fromBytes(encryptedData);
-      const conditionContext =
-        conditions.context.ConditionContext.fromMessageKit(messageKitFromBytes);
+      await this._ensureInitialized();
+      
+      const { conditions } = tacoModules;
+      const { ViemEIP4361AuthProvider, USER_ADDRESS_PARAM_DEFAULT } = tacoAuthModules;
+      
+      // Create condition context from messageKit
+      const conditionContext = conditions.context.ConditionContext.fromMessageKit(messageKit);
+      
+      // Use custom viem account if provided, otherwise use Agent's configured account
+      const viemAccount = customViemAccount || this.viemAccount;
+      
+      // Create viem-native authentication provider
+      const authProvider = await ViemEIP4361AuthProvider.create(
+        this.viemClient, // viem PublicClient
+        viemAccount      // viem Account
+      );
+      
+      conditionContext.addAuthProvider(USER_ADDRESS_PARAM_DEFAULT, authProvider.ethersProvider);
+      
+      return conditionContext;
+    } catch (error) {
+      console.error('❌ Failed to create condition context:', error.message);
+      throw new Error(`Failed to create condition context: ${error.message}`);
+    }
+  }
 
-      // Add auth provider for condition if needed
-      if (
-        conditionContext.requestedContextParameters.has(
-          USER_ADDRESS_PARAM_DEFAULT
-        )
-      ) {
-        const authProvider = new EIP4361AuthProvider(
-          this.config.provider,
-          signer
-        );
-        conditionContext.addAuthProvider(
-          USER_ADDRESS_PARAM_DEFAULT,
-          authProvider
-        );
+  /**
+   * Decrypt data using the published TACo viem integration
+   * Matches the exact signature: decryptWithViem(viemPublicClient, domain, messageKit, context?, porterUris?)
+   */
+  async decrypt(messageKit, conditionContext) {
+    try {
+      // Ensure TACo is fully initialized (modules + domains)
+      await this._ensureInitialized();
+
+      console.debug(`🔓 Starting TACo decryption for domain ${this.domain}`);
+
+      // Use the published package's decryptWithViem function directly
+      // Signature: decryptWithViem(viemPublicClient, domain, messageKit, context?, porterUris?)
+      const decryptedData = await decryptWithViem(
+        this.viemClient, // viemPublicClient
+        this.domain, // domain
+        messageKit, // messageKit
+        conditionContext, // context (optional)
+        undefined // porterUris (optional)
+      );
+
+      console.debug('✅ TACo decryption successful');
+
+      // Convert Uint8Array to string for text data
+      if (decryptedData instanceof Uint8Array) {
+        return new TextDecoder().decode(decryptedData);
       }
 
-      const decryptedMessage = await decrypt(
-        this.config.provider,
-        this.config.domain,
-        messageKitFromBytes,
-        conditionContext
-      );
-      return new TextDecoder().decode(decryptedMessage);
+      return decryptedData;
     } catch (error) {
+      console.error('❌ TACo decryption failed:', error.message);
+      console.debug('Decryption error context:', {
+        domain: this.domain,
+        hasMessageKit: !!messageKit,
+        hasViemClient: !!this.viemClient,
+        accountAddress: this.viemAccount?.address || 'N/A'
+      });
       throw new Error(`TACo decryption failed: ${error.message}`);
     }
   }
 
   /**
-   * Serialize condition for storage
+   * Convenience method to decrypt with automatic condition context creation using viem
+   * @param {Object} messageKit - The encrypted message kit
+   * @param {Object} customViemAccount - Optional custom viem account for authentication
+   * @returns {string} Decrypted content
    */
-  serializeCondition(condition) {
-    return {
-      type: condition.constructor.name,
-      params: condition.toDict ? condition.toDict() : condition,
+  async decryptWithAutoContext(messageKit, customViemAccount = null) {
+    const conditionContext = await this.createConditionContext(messageKit, customViemAccount);
+    return await this.decrypt(messageKit, conditionContext);
+  }
+
+  /**
+   * Get chain ID for the current domain
+   */
+  getChainId() {
+    const chainMapping = {
+      lynx: 80002, // DEVNET - Polygon Amoy
+      DEVNET: 80002,
+      tapir: 80002, // TESTNET - Polygon Amoy
+      TESTNET: 80002,
+      MAINNET: 137, // MAINNET - Polygon
     };
+
+    return chainMapping[this.domain] || 80002; // Default to Amoy
   }
 
   /**
-   * Check if TACo is initialized
+   * Validate TACo configuration
    */
-  isInitialized() {
-    return this.config?.isInitialized === true;
-  }
+  static validateConfig(config) {
+    const errors = [];
 
-  /**
-   * Get TACo configuration
-   */
-  getConfig() {
-    return { ...this.config };
-  }
-
-  // Private methods
-  async _loadTacoModules() {
-    if (!taco) {
-      try {
-        const { createRequire } = await import("module");
-        const require = createRequire(import.meta.url);
-        taco = require("@nucypher/taco");
-        tacoAuth = require("@nucypher/taco-auth");
-
-        if (
-          !taco.initialize ||
-          !taco.conditions ||
-          !taco.encrypt ||
-          !taco.decrypt
-        ) {
-          throw new Error("Required TACo exports not found");
-        }
-
-        ({
-          initialize,
-          conditions,
-          encrypt,
-          decrypt,
-          domains,
-          ThresholdMessageKit,
-        } = taco);
-        ({ EIP4361AuthProvider, USER_ADDRESS_PARAM_DEFAULT } = tacoAuth);
-      } catch (error) {
-        throw new Error(`Failed to import TACo dependencies: ${error.message}`);
-      }
-    }
-  }
-
-  async _getChainId() {
-    // Handle both ethers v5 and v6 provider APIs
-    if (typeof this.config.provider.getChainId === 'function') {
-      return await this.config.provider.getChainId();
-    } else if (typeof this.config.provider.getNetwork === 'function') {
-      const network = await this.config.provider.getNetwork();
-      return network.chainId;
-    } else {
-      throw new Error('Provider does not support chain ID retrieval');
-    }
-  }
-
-  async _validateNetwork() {
-    if (!this.config.provider) {
-      throw new Error("Provider is required for TACo initialization");
+    if (!config.ritualId || config.ritualId <= 0) {
+      errors.push("Valid ritual ID is required");
     }
 
-    const chainId = await this._getChainId();
-    if (!TACO_CONFIG.SUPPORTED_NETWORKS.includes(chainId)) {
-      throw new Error(`Network ${chainId} is not supported by TACo.`);
+    if (!config.domain) {
+      errors.push("TACo domain is required");
+    } else if (
+      !["lynx", "DEVNET", "tapir", "TESTNET", "MAINNET"].includes(config.domain)
+    ) {
+      errors.push(
+        "Invalid TACo domain. Supported: lynx, DEVNET, tapir, TESTNET, MAINNET"
+      );
     }
 
-    if (!this.config.ritualId || this.config.ritualId <= 0) {
-      throw new Error("Valid ritual ID is required for TACo initialization");
-    }
-  }
-
-  async _initializeTaco() {
-    await initialize();
-  }
-
-  _validateConditionConfig(conditionConfig) {
-    if (!conditionConfig || typeof conditionConfig !== "object") {
-      throw new Error(ERROR_MESSAGES.CONDITION_CONFIG_INVALID);
-    }
-
-    if (!conditionConfig.type || typeof conditionConfig.type !== "string") {
-      throw new Error(ERROR_MESSAGES.CONDITION_TYPE_REQUIRED);
-    }
-  }
-
-  _validateContractConditionParams(params) {
-    if (!params.contractAddress || typeof params.contractAddress !== "string") {
-      throw new Error("contractAddress is required for contract conditions");
-    }
-    if (!params.method || typeof params.method !== "string") {
-      throw new Error("method is required for contract conditions");
-    }
-    if (!params.chain || typeof params.chain !== "number") {
-      throw new Error("chain ID is required for contract conditions");
-    }
-  }
-
-  _validateTimeConditionParams(params) {
-    if (!params.method || typeof params.method !== "string") {
-      throw new Error("method is required for time conditions");
-    }
-    if (!params.chain || typeof params.chain !== "number") {
-      throw new Error("chain ID is required for time conditions");
-    }
-  }
-
-  _validateRpcConditionParams(params) {
-    if (!params.method || typeof params.method !== "string") {
-      throw new Error("method is required for RPC conditions");
-    }
-    if (!params.chain || typeof params.chain !== "number") {
-      throw new Error("chain ID is required for RPC conditions");
-    }
+    return {
+      isValid: errors.length === 0,
+      errors,
+    };
   }
 }

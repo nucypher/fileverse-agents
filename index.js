@@ -1,14 +1,15 @@
-import { Agent, TacoEncryption } from "./agent/index.js";
+import { Agent } from "./agent/index.js";
 import {
   PinataStorageProvider,
   SwarmStorageProvider,
   BaseStorageProvider,
 } from "./storage/index.js";
 import { PortalRegistryABI, PortalABI } from "./abi/index.js";
+import { TacoService } from "./services/TacoService.js";
 
 export {
   Agent,
-  TacoEncryption,
+  TacoService,
   PinataStorageProvider,
   SwarmStorageProvider,
   PortalRegistryABI,
@@ -17,7 +18,7 @@ export {
 
 export default {
   Agent,
-  TacoEncryption,
+  TacoService,
   BaseStorageProvider,
   PinataStorageProvider,
   SwarmStorageProvider,

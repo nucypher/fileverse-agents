@@ -1,7 +1,7 @@
 {
   "name": "@fileverse/agents",
   "version": "2.0.1",
-  "description": "Interface to use fileverse infra programmatically",
+  "description": "Interface to use fileverse infra programmatically - Fileverse Agents SDK with blockchain integration, IPFS storage, and optional TACo encryption",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -13,7 +13,12 @@
     "AI",
     "fileverse",
     "infra",
-    "onchain"
+    "onchain",
+    "encryption",
+    "TACo Threshold Access Control",
+    "blockchain",
+    "IPFS",
+    "storage"
   ],
   "repository": {
     "type": "git",
@@ -23,8 +28,9 @@
   "license": "MIT",
   "dependencies": {
     "@ethersphere/bee-js": "^9.0.2",
-    "@nucypher/taco": "0.6.0",
-    "@nucypher/taco-auth": "0.3.0",
+    "@nucypher/shared": "file:../../taco/taco-web/packages/shared",
+    "@nucypher/taco": "file:../../taco/taco-web/packages/taco",
+    "@nucypher/taco-auth": "file:../../taco/taco-web/packages/taco-auth",
     "@ucans/ucans": "^0.12.0",
     "crypto": "^1.0.1",
     "dotenv": "^16.6.1",
