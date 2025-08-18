@@ -1,18 +1,27 @@
 import { describe, it, before } from 'mocha';
-import { expect } from 'chai';
-import { Agent, TacoEncryption } from "../agent/index.js";
+import { expect } from "chai";
+import { Agent } from "../index.js";
+import { TacoService } from "../services/TacoService.js";
+import { createRequire } from "module";
+
+// Create require function for CommonJS imports
+const require = createRequire(import.meta.url);
+
+// TACo modules - loaded via require
+let domains, conditions;
 import { PinataStorageProvider } from "../storage/pinata.js";
 import { privateKeyToAccount } from "viem/accounts";
+import { createPublicClient, http } from "viem";
+import { polygonAmoy } from "viem/chains";
 import dotenv from "dotenv";
-
-// TACo imports will be loaded dynamically
-let taco, domains, conditions;
 
 const TACO_DOMAIN = process.env.TACO_DOMAIN || "lynx";
 const TACO_RITUAL_ID = parseInt(process.env.TACO_RITUAL_ID || 27);
 
-const CHAIN_ID = parseInt(process.env.CHAIN_ID || 11155111);
-const CHAIN = process.env.CHAIN || "sepolia";
+// TACo testing with domain tapir on Polygon Amoy (chain ID 80002)
+const TACO_CHAIN_ID = parseInt(process.env.TACO_CHAIN_ID || 80002);
+
+const AGENT_CHAIN = process.env.AGENT_CHAIN || "sepolia";
 
 dotenv.config();
 
@@ -23,12 +32,19 @@ describe("TACo Integration Tests - TACo Available", function () {
   let storageProvider;
 
   before(async function () {
-    // Import TACo - tests will fail if TACo is not available
-    const { createRequire } = await import("module");
-    const require = createRequire(import.meta.url);
+    this.timeout(30000); // Increase timeout for network operations
 
-    taco = require("@nucypher/taco");
-    ({ domains, conditions } = taco);
+    try {
+      // Load TACo using require for reliable CommonJS import
+      const TACo = require("@nucypher/taco");
+      ({ domains, conditions } = TACo);
+
+      if (!domains || !conditions) {
+        throw new Error("TACo packages not properly loaded");
+      }
+    } catch (error) {
+      throw new Error(`Failed to load TACo packages: ${error.message}`);
+    }
 
     // Initialize storage provider
     storageProvider = new PinataStorageProvider({
@@ -37,16 +53,27 @@ describe("TACo Integration Tests - TACo Available", function () {
         process.env.PINATA_GATEWAY || "https://test-gateway.mypinata.cloud",
     });
 
+    // Create TACo-specific viem client for the Agent
+    const agentTacoClient = createPublicClient({
+      chain: polygonAmoy,
+      transport: http(),
+    });
+
+    console.log(
+      `✅ Created Agent's TACo viem client for chain ${await agentTacoClient.getChainId()}`
+    );
+
     // Initialize agent with TACo configuration
     agent = new Agent({
-      chain: CHAIN,
+      chain: AGENT_CHAIN,
       viemAccount: privateKeyToAccount(process.env.PRIVATE_KEY),
       pimlicoAPIKey: process.env.PIMLICO_API_KEY,
       storageProvider,
       taco: {
         domain: TACO_DOMAIN,
         ritualId: parseInt(TACO_RITUAL_ID),
-        provider: null, // Will use publicClient
+        provider: null, // Will use publicClient for basic operations
+        viemClient: agentTacoClient, // Provide TACo-specific client
       },
     });
 
@@ -63,7 +90,7 @@ describe("TACo Integration Tests - TACo Available", function () {
 
     it("should handle missing TACo configuration gracefully", function () {
       const agentWithoutTaco = new Agent({
-        chain: CHAIN,
+        chain: AGENT_CHAIN,
         viemAccount: privateKeyToAccount(process.env.PRIVATE_KEY),
         pimlicoAPIKey: process.env.PIMLICO_API_KEY,
         storageProvider,
@@ -84,24 +111,33 @@ describe("TACo Integration Tests - TACo Available", function () {
     });
 
     it("should create encrypted files when accessConditions are provided", async function () {
-      const accessConditions = {
-        type: "rpc",
-        chain: CHAIN_ID,
+      // Log chain configuration for encryption test
+      const agentChainId = await agent.publicClient.getChainId();
+      console.log(`🔍 Encryption Test Configuration:`);
+      console.log(`   Agent Chain ID: ${agentChainId}`);
+      console.log(`   Condition Chain ID: ${TACO_CHAIN_ID}`);
+      console.log(`   TACo Domain: ${TACO_DOMAIN}`);
+
+      // Use loaded TACo conditions (from require)
+
+      // Create a native TACo RPC condition (simple balance check)
+      const accessConditions = new conditions.base.rpc.RpcCondition({
+        chain: TACO_CHAIN_ID,
         method: "eth_getBalance",
         parameters: [":userAddress", "latest"],
         returnValueTest: {
           comparator: ">=",
           value: 0, // Any balance
         },
-      };
+      });
 
       const result = await agent.create("This is an encrypted test file", {
-        accessConditions,
+        accessCondition: accessConditions,
       });
 
       expect(result).to.have.property("fileId");
       expect(result).to.have.property("encrypted", true);
-      expect(result).to.have.property("accessConditions");
+      expect(result).to.have.property("accessCondition");
       expect(result).to.have.property("hash");
     });
 
@@ -128,29 +164,48 @@ describe("TACo Integration Tests - TACo Available", function () {
     let tacoEncryption;
 
     beforeEach(async function () {
-      // Create TacoEncryption instance for testing condition creation
-      tacoEncryption = new TacoEncryption({
-        taco: {
-          ritualId: TACO_RITUAL_ID,
-          domain: TACO_DOMAIN,
-        },
-        agent: agent,
+      // Log the chain configuration mismatch issue
+      const agentChainId = await agent.publicClient.getChainId();
+      console.log(`🔍 Configuration Analysis:`);
+      console.log(`   Agent Chain: ${AGENT_CHAIN}`);
+      console.log(`   Agent Client Chain ID: ${agentChainId}`);
+      console.log(`   TACo Chain ID: ${TACO_CHAIN_ID}`);
+      console.log(`   TACo Domain: ${TACO_DOMAIN}`);
+      console.log(`   TACo Ritual ID: ${TACO_RITUAL_ID}`);
+
+      if (agentChainId !== TACO_CHAIN_ID) {
+        console.warn(
+          `⚠️  CHAIN MISMATCH: Agent client (${agentChainId}) != TACo chain (${TACO_CHAIN_ID})`
+        );
+        console.warn(`   This will cause coordinator contract lookup to fail!`);
+      }
+
+      // Create TACo-specific viem client connected to Polygon Amoy
+      const tacoViemClient = createPublicClient({
+        chain: polygonAmoy,
+        transport: http(),
       });
 
-      // Initialize TACo for condition creation tests (this might fail but that's ok for testing conditions)
-      try {
-        await tacoEncryption.initializeTaco();
-      } catch (error) {
-        console.log(
-          "TACo initialization failed in test, but continuing with condition tests"
-        );
-      }
+      console.log(
+        `✅ Created TACo viem client for chain ${await tacoViemClient.getChainId()}`
+      );
+
+      // Create TacoService instance with correct chain client
+      tacoEncryption = new TacoService({
+        ritualId: TACO_RITUAL_ID,
+        domain: TACO_DOMAIN,
+        viemClient: tacoViemClient, // Use TACo-specific client
+        viemAccount: agent.viemAccount,
+      });
+
+      // Initialize TACo for condition creation tests
+      await tacoEncryption.initialize();
     });
 
     it("should create valid contract conditions", async function () {
-      const conditionConfig = {
-        type: "contract",
-        chain: CHAIN_ID,
+      // Create native TACo contract condition
+      const condition = new conditions.base.contract.ContractCondition({
+        chain: TACO_CHAIN_ID,
         contractAddress: "0x1234567890123456789012345678901234567890",
         method: "balanceOf",
         parameters: [":userAddress"],
@@ -159,64 +214,58 @@ describe("TACo Integration Tests - TACo Available", function () {
           value: 1,
         },
         standardContractType: "ERC721",
-      };
+      });
 
-      const condition = await tacoEncryption.createConditionFromConfig(
-        conditionConfig
-      );
       expect(condition).to.exist;
       expect(condition.constructor.name).to.equal("ContractCondition");
     });
 
     it("should create valid time conditions", async function () {
-      const conditionConfig = {
-        type: "time",
-        chain: CHAIN_ID,
+      // Create native TACo time condition
+      const condition = new conditions.base.time.TimeCondition({
+        chain: TACO_CHAIN_ID,
         method: "blocktime",
         returnValueTest: {
           comparator: "<=",
           value: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
         },
-      };
+      });
 
-      const condition = await tacoEncryption.createConditionFromConfig(
-        conditionConfig
-      );
       expect(condition).to.exist;
       expect(condition.constructor.name).to.equal("TimeCondition");
     });
 
     it("should create valid RPC conditions", async function () {
-      const conditionConfig = {
-        type: "rpc",
-        chain: CHAIN_ID,
+      // Create native TACo RPC condition
+      const condition = new conditions.base.rpc.RpcCondition({
+        chain: TACO_CHAIN_ID,
         method: "eth_getBalance",
         parameters: [":userAddress", "latest"],
         returnValueTest: {
           comparator: ">=",
           value: 1000000000000000, // 0.001 ETH in wei (smaller number for validation)
         },
-      };
+      });
 
-      const condition = await tacoEncryption.createConditionFromConfig(
-        conditionConfig
-      );
       expect(condition).to.exist;
       expect(condition.constructor.name).to.equal("RpcCondition");
     });
 
-    it("should throw error for unsupported condition types", async function () {
-      const conditionConfig = {
-        type: "unsupported",
-        chain: CHAIN_ID,
-      };
+    it("should validate native TACo condition objects", async function () {
+      // Test that native TACo conditions work with proper validation
+      const validCondition = new conditions.base.rpc.RpcCondition({
+        chain: TACO_CHAIN_ID,
+        method: "eth_getBalance",
+        parameters: [":userAddress", "latest"],
+        returnValueTest: {
+          comparator: ">=",
+          value: 0,
+        },
+      });
 
-      try {
-        await tacoEncryption.createConditionFromConfig(conditionConfig);
-        expect.fail("Should have thrown an error");
-      } catch (error) {
-        expect(error.message).to.include("Unsupported condition type");
-      }
+      expect(validCondition).to.exist;
+      expect(validCondition.constructor.name).to.equal("RpcCondition");
+      // Test that the condition was created successfully with proper structure
     });
   });
 });
@@ -238,7 +287,7 @@ describe("TACo Integration Tests - TACo Not Available", function () {
 
     // Initialize agent WITHOUT TACo configuration
     agentWithoutTaco = new Agent({
-      chain: CHAIN,
+      chain: AGENT_CHAIN,
       viemAccount: privateKeyToAccount(process.env.PRIVATE_KEY),
       pimlicoAPIKey: process.env.PIMLICO_API_KEY,
       storageProvider,
@@ -263,10 +312,10 @@ describe("TACo Integration Tests - TACo Not Available", function () {
       expect(result).to.have.property("hash");
     });
 
-    it("should throw error when accessConditions provided but TACo not configured", async function () {
-      const accessConditions = {
-        type: "rpc",
-        chain: CHAIN_ID,
+    it("should throw error when accessCondition provided but TACo not configured", async function () {
+      // Create a mock TACo condition object (since we don't have TACo loaded in this test)
+      const accessCondition = {
+        chain: TACO_CHAIN_ID,
         method: "eth_getBalance",
         parameters: [":userAddress", "latest"],
         returnValueTest: {
@@ -277,34 +326,36 @@ describe("TACo Integration Tests - TACo Not Available", function () {
 
       try {
         await agentWithoutTaco.create("Test with conditions but no TACo", {
-          accessConditions,
+          accessCondition,
         });
         expect.fail("Should have thrown an error");
       } catch (error) {
         expect(error.message).to.include(
-          "Access conditions provided but TACo is not configured"
+          "Access condition provided but TACo is not configured"
         );
       }
     });
   });
 
-  describe("TacoEncryption without TACo package", function () {
-    it("should throw error when creating TacoEncryption without TACo config", function () {
-      expect(() => {
-        new TacoEncryption({
-          taco: null, // No TACo config
-          agent: agentWithoutTaco,
+  describe("TacoService without TACo package", function () {
+    it("should throw error when creating TacoService without ritualId", function () {
+      expect(function () {
+        new TacoService({
+          domain: "TESTNET",
+          viemClient: "valid_client",
+          viemAccount: "valid_account",
         });
-      }).to.throw("TACo configuration is required");
+      }).to.throw("Valid ritual ID is required for TACo initialization");
     });
 
-    it("should throw error when creating TacoEncryption without agent", function () {
-      expect(() => {
-        new TacoEncryption({
-          taco: { ritualId: TACO_RITUAL_ID, domain: TACO_DOMAIN },
-          agent: null, // No agent
+    it("should throw error when creating TacoService without viemClient", function () {
+      expect(function () {
+        new TacoService({
+          ritualId: 6,
+          domain: "TESTNET",
+          viemAccount: "valid_account",
         });
-      }).to.throw("Agent instance is required");
+      }).to.throw("Viem client is required for TACo operations");
     });
   });
 });
