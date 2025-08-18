@@ -8,17 +8,6 @@ export const NETWORK_CONFIG = {
   SUPPORTED_CHAINS: ["gnosis", "sepolia"],
 };
 
-// TACo (Threshold Access Control) configuration
-export const TACO_CONFIG = {
-  SUPPORTED_NETWORKS: [80002, 137, 11155111, 1], // Amoy, Polygon, Sepolia, Mainnet
-  DOMAINS: {
-    DEVNET: "lynx",
-    TESTNET: "tapir",
-    MAINNET: "mainnet",
-  },
-  DEFAULT_DOMAIN: "tapir", // TESTNET
-};
-
 // Error messages
 export const ERROR_MESSAGES = {
   CHAIN_REQUIRED: "Chain is required - options: gnosis, sepolia",
