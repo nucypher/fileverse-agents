@@ -45,7 +45,7 @@ class Agent {
       storageProvider: storageProvider?.constructor?.name || 'Unknown',
       hasTacoConfig: !!taco
     });
-    
+
     ValidationService.validateAgentConfig({
       chain,
       viemAccount,
@@ -70,7 +70,7 @@ class Agent {
         ? gnosis
         : sepolia;
     console.debug(`🔗 Chain selected: ${this.chain.name} (ID: ${this.chain.id})`);
-    
+
     this.pimlicoAPIKey = pimlicoAPIKey;
     this.storageProvider = storageProvider;
     this.viemAccount = viemAccount;
@@ -529,7 +529,7 @@ class Agent {
         const encryptedBytes = await this.storageProvider.downloadBytes(
           fileInfo.contentIpfsHash
         );
-        
+
         // Decrypt with automatic condition context creation
         // Use custom viem account if provided, otherwise TacoService uses Agent's configured account
         const decryptedContent = await tacoService.decryptWithAutoContext(encryptedBytes, viemAccount);
