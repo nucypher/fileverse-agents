@@ -88,38 +88,43 @@ class Agent {
     console.debug(`📜 Portal registry: ${this.portalRegistry}`);
 
     this.owner = this.viemAccount.address;
+    this._tacoClient = null;
     console.debug(`✅ Agent initialized for address: ${this.owner}`);
   }
 
   /**
-   * Get or create TacoService instance when TACo configuration is available
+   * Get TACo client instance with lazy loading
+   * @returns {TacoClient|null}
    * @private
    */
-  async _getTacoService() {
-    if (!this.tacoConfig) {
-      return null;
-    }
+  async _getTacoClient() {
+    if (!this.tacoConfig) return null;
 
-    if (!this._tacoService) {
-      // Import TacoService
-      const { TacoService } = await import("../services/TacoService.js");
-
-      this._tacoService = new TacoService({
-        ritualId: this.tacoConfig.ritualId,
-        domain: this.tacoConfig.domain,
-        viemClient: this.tacoConfig.viemClient || this.publicClient, // Use TACo-specific client if provided
-        viemAccount: this.viemAccount, // Use Agent's viem account
-      });
-
-      // Initialize TACo service
-      try {
-        await this._tacoService.initialize();
-      } catch (error) {
-        console.warn('⚠️ Failed to initialize TACo:', error.message);
+    if (!this._tacoClient) {
+      let TacoModule;
+      // Environment detection: use createRequire in Node.js, dynamic import in browser
+      if (typeof window === "undefined" && process?.versions?.node) {
+        // Node.js environment - use createRequire for local linked packages
+        const { createRequire } = await import("module");
+        const require = createRequire(import.meta.url);
+        TacoModule = require("@nucypher/taco");
+        console.debug('TACo loaded via require (Node.js environment)');
+      } else {
+        // Browser environment - use dynamic import
+        TacoModule = await import("@nucypher/taco");
+        console.debug('TACo loaded via dynamic import (Browser environment)');
       }
+      
+      const { TacoClient } = TacoModule;
+      this._tacoClient = new TacoClient({
+        domain: this.tacoConfig.domain,
+        ritualId: this.tacoConfig.ritualId,
+        viemClient: this.tacoConfig.viemClient || this.publicClient,
+        viemAccount: this.viemAccount,
+      });
     }
 
-    return this._tacoService;
+    return this._tacoClient;
   }
 
   /**
@@ -299,19 +304,6 @@ class Agent {
   }
 
   /**
-   * Initialize TACo if configuration is available
-   * @returns {Promise<boolean>} True if TACo was initialized, false if no config
-   */
-  async initializeTaco() {
-    const tacoService = await this._getTacoService();
-    if (tacoService) {
-      await tacoService.initialize();
-      return true;
-    }
-    return false;
-  }
-
-  /**
    * Create a new file (public or encrypted based on a composite or a simple accessCondition)
    *
    * @param {string|object} output - The file content (string for text, object for JSON)
@@ -358,22 +350,19 @@ class Agent {
 
     // Handle encryption if accessCondition is provided
     if (options.accessCondition) {
-      const tacoService = await this._getTacoService();
-      if (!tacoService) {
+      const tacoClient = await this._getTacoClient();
+      if (!tacoClient) {
         throw new Error(
-          "Access condition provided but TACo is not configured. TACo configuration is required for encrypted file operations."
+          `TACo configuration is required for encrypted files. Please provide a valid TACo configuration in the Agent constructor.`
         );
       }
 
       // Encrypt the content using native TACo condition
-      const messageKit = await tacoService.encrypt(
-        output,
-        options.accessCondition
-      );
+      const messageKit = await tacoClient.encrypt(contentToUpload, options.accessCondition);
       contentToUpload = messageKit.toBytes();
       filename = "encrypted_content.bin";
       isEncrypted = true;
-      tacoRitualId = tacoService.ritualId;
+      tacoRitualId = tacoClient.getConfig().ritualId;
       filetype = 1; // 1 = ENCRYPTED
     }
 
@@ -521,18 +510,17 @@ class Agent {
     ValidationService.validateFileId(fileId);
     const fileInfo = await this.getFile(fileId);
 
-    // Use TacoService for encrypted files
+    // Use TacoClient for encrypted files
     if (fileInfo.metadata.encrypted) {
-      const tacoService = await this._getTacoService();
-      if (tacoService) {
+      const tacoClient = await this._getTacoClient();
+      if (tacoClient) {
         // Download encrypted bytes and decrypt
         const encryptedBytes = await this.storageProvider.downloadBytes(
           fileInfo.contentIpfsHash
         );
         
         // Decrypt with automatic condition context creation
-        // Use custom viem account if provided, otherwise TacoService uses Agent's configured account
-        const decryptedContent = await tacoService.decryptWithAutoContext(encryptedBytes, viemAccount);
+        const decryptedContent = await tacoClient.decryptWithAutoContext(encryptedBytes);
 
         return {
           ...fileInfo,
