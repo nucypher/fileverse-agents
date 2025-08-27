@@ -1,6 +1,6 @@
 /**
  * TACo Configuration Management
- * 
+ *
  * Unified class for TACo domain configuration, validation, and normalization.
  * Consolidates functionality from taco-domains.js and taco-config-validator.js.
  */
@@ -12,7 +12,7 @@
  * needed for TACo encryption/decryption operations.
  */
 export const TACO_DOMAINS = {
-  // DEVNET (also called lynx) - Bleeding-edge developer network
+  // DEVNET (also called lynx) - Bleeding-edge developer network - use only when working on new features that are not yet available on testnet or mainnet
   // L1: Sepolia (11155111), L2: Polygon Amoy (80002)
   // Cohort: 2-of-3, Portal: https://lynx-3.nucypher.network:9151/status
   // Status: Testnet (Development) - May have breaking changes
@@ -20,14 +20,14 @@ export const TACO_DOMAINS = {
   DEVNET: {
     chainId: 80002,
     suggestedProviderRpcUrls: [
-      'https://rpc-amoy.polygon.technology',
-      'https://polygon-amoy.drpc.org'
+      "https://rpc-amoy.polygon.technology",
+      "https://polygon-amoy.drpc.org",
     ],
     rituals: [
       27, // Open ritual, no encryptor restrictions
       // Contact TACo team if you would like to perform a new ritual and obtain a new custom ritual id on devnet.
     ],
-    alias: 'lynx',
+    alias: "lynx",
   },
 
   // TESTNET (also called tapir) - Stable testnet for current TACo release
@@ -38,14 +38,14 @@ export const TACO_DOMAINS = {
   TESTNET: {
     chainId: 80002,
     suggestedProviderRpcUrls: [
-      'https://rpc-amoy.polygon.technology',
-      'https://polygon-amoy.drpc.org'
+      "https://rpc-amoy.polygon.technology",
+      "https://polygon-amoy.drpc.org",
     ],
     rituals: [
       6, // Open ritual, no encryptor restrictions
       // Contact TACo team if you would like to perform a new ritual and obtain a new custom ritual id on testnet.
     ],
-    alias: 'tapir',
+    alias: "tapir",
   },
 
   // MAINNET - Production network
@@ -56,15 +56,15 @@ export const TACO_DOMAINS = {
   MAINNET: {
     chainId: 137,
     suggestedProviderRpcUrls: [
-      'https://polygon-rpc.com',
-      'https://rpc-mainnet.polygon.technology'
+      "https://polygon-rpc.com",
+      "https://rpc-mainnet.polygon.technology",
     ],
     rituals: [
       // No open rituals - all custom
       // Contact TACo team to set up a custom ritual for your production use on mainnet.
     ],
-    alias: 'mainnet',
-  }
+    alias: "mainnet",
+  },
 };
 
 /**
@@ -165,15 +165,15 @@ export class TacoConfig {
   }
 
   // ========================================
-  // Configuration Validation Methods
+  // Configuration Management Methods
   // ========================================
 
   /**
-   * Validate a TACo configuration object
+   * Validate a TACo configuration (pure validation only)
    * @param {Object} config - Configuration to validate
-   * @returns {Object} Validation result with isValid, errors, and normalized config
+   * @returns {Object} Validation result with isValid, errors, and config
    */
-  static validateConfig(config) {
+  static validate(config) {
     const errors = [];
 
     if (!config.domain) {
@@ -212,55 +212,53 @@ export class TacoConfig {
     };
   }
 
-  // ========================================
-  // Configuration Normalization Methods
-  // ========================================
-
   /**
-   * Auto-correct common configuration mistakes
-   * @param {Object} userConfig - User configuration to correct
-   * @returns {Object} Corrected configuration
+   * Process a TACo configuration (auto-correct + validate + normalize)
+   * @param {Object} userConfig - User-provided TACo configuration
+   * @returns {Object} Fully processed and normalized configuration
+   * @throws {Error} If configuration is invalid after auto-correction
    */
-  static autoCorrect(userConfig) {
-    const corrected = { ...userConfig };
+  static process(userConfig) {
+    // Step 1: Auto-correct common mistakes
+    let config = { ...userConfig };
 
     // Auto-correct domain casing
-    if (typeof corrected.domain === 'string') {
-      const upperDomain = corrected.domain.toUpperCase();
-      if (['DEVNET', 'TESTNET', 'MAINNET'].includes(upperDomain)) {
-        corrected.domain = upperDomain;
+    if (typeof config.domain === 'string') {
+      const upperDomain = config.domain.toUpperCase();
+      if (this.getSupportedDomains().includes(upperDomain)) {
+        config.domain = upperDomain;
+      }
+      else {
+        // Check if the domain matches any of the aliases in TACO_DOMAINS
+        // that is to check if the provided name was: `lynx`, `tapir` or `mainnet`.
+        const domainEntry = Object.entries(TACO_DOMAINS).find(([, domainConfig]) =>
+          domainConfig.alias && domainConfig.alias.toLowerCase() === config.domain.toLowerCase()
+        );
+        if (domainEntry) {
+          config.domain = domainEntry[0].alias;
+        }
       }
     }
 
     // Auto-set default ritual ID for testnets if missing
-    if (corrected.domain && this.isValidDomain(corrected.domain)) {
-      if (!this.isProductionDomain(corrected.domain) && !corrected.ritualId) {
-        const defaultRitualId = this.getDefaultRitualId(corrected.domain);
+    if (config.domain && this.isValidDomain(config.domain)) {
+      if (!this.isProductionDomain(config.domain) && !config.ritualId) {
+        const defaultRitualId = this.getDefaultRitualId(config.domain);
         if (defaultRitualId) {
-          corrected.ritualId = defaultRitualId;
+          config.ritualId = defaultRitualId;
         }
       }
     }
-    
-    return corrected;
-  }
 
-  /**
-   * Validate and normalize a TACo configuration (high-level method)
-   * @param {Object} userConfig - User-provided TACo configuration
-   * @returns {Object} Normalized and validated configuration
-   */
-  static validateAndNormalize(userConfig) {
-    const config = { ...userConfig };
-    
-    // Validate using domain validator
-    const validation = this.validateConfig(config);
+    // Step 2: Validate the corrected configuration
+    const validation = this.validate(config);
     if (!validation.isValid) {
       throw new Error(`TACo Configuration Error: ${validation.errors.join(', ')}`);
     }
-    
+
+    // Step 3: Normalize with additional properties
     const domainConfig = TACO_DOMAINS[config.domain];
-    
+
     return {
       ...config,
       ritualId: config.ritualId || this.getDefaultRitualId(config.domain),
@@ -268,25 +266,5 @@ export class TacoConfig {
       rpcUrl: config.rpcUrl || this.getDefaultRpcUrl(config.domain)
     };
   }
-
-  // ========================================
-  // Utility Methods
-  // ========================================
-
-  /**
-   * Get domain recommendations based on use case
-   * @returns {Object} Recommendations for different use cases
-   */
-  static getRecommendations() {
-    return {
-      bleedingEdge: 'DEVNET',
-      development: 'TESTNET',
-      testing: 'TESTNET',
-      production: 'MAINNET'
-    };
-  }
 }
 
-// Legacy exports for backward compatibility (will be removed in future version)
-export const TacoDomainValidator = TacoConfig;
-export const TacoConfigValidator = TacoConfig;
