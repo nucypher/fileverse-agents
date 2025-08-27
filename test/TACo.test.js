@@ -331,7 +331,7 @@ describe("TACo Integration Tests - TACo Not Available", function () {
         expect.fail("Should have thrown an error");
       } catch (error) {
         expect(error.message).to.include(
-          "Access condition provided but TACo is not configured"
+          "TACo configuration is required for encrypted files"
         );
       }
     });
