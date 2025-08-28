@@ -1,7 +1,7 @@
 import { describe, it, before } from 'mocha';
 import { expect } from "chai";
 import { Agent } from "../index.js";
-import { TacoService } from "../services/TacoService.js";
+import { TacoClient, initialize } from "@nucypher/taco";
 import { createRequire } from "module";
 
 // Create require function for CommonJS imports
@@ -190,8 +190,8 @@ describe("TACo Integration Tests - TACo Available", function () {
         `✅ Created TACo viem client for chain ${await tacoViemClient.getChainId()}`
       );
 
-      // Create TacoService instance with correct chain client
-      tacoEncryption = new TacoService({
+      // Create TacoClient instance with correct chain client
+      tacoEncryption = new TacoClient({
         ritualId: TACO_RITUAL_ID,
         domain: TACO_DOMAIN,
         viemClient: tacoViemClient, // Use TACo-specific client
@@ -199,7 +199,7 @@ describe("TACo Integration Tests - TACo Available", function () {
       });
 
       // Initialize TACo for condition creation tests
-      await tacoEncryption.initialize();
+      await initialize();
     });
 
     it("should create valid contract conditions", async function () {
@@ -334,28 +334,6 @@ describe("TACo Integration Tests - TACo Not Available", function () {
           "TACo configuration is required for encrypted files"
         );
       }
-    });
-  });
-
-  describe("TacoService without TACo package", function () {
-    it("should throw error when creating TacoService without ritualId", function () {
-      expect(function () {
-        new TacoService({
-          domain: "TESTNET",
-          viemClient: "valid_client",
-          viemAccount: "valid_account",
-        });
-      }).to.throw("Valid ritual ID is required for TACo initialization");
-    });
-
-    it("should throw error when creating TacoService without viemClient", function () {
-      expect(function () {
-        new TacoService({
-          ritualId: 6,
-          domain: "TESTNET",
-          viemAccount: "valid_account",
-        });
-      }).to.throw("Viem client is required for TACo operations");
     });
   });
 });

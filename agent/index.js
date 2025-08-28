@@ -13,9 +13,10 @@ import { entryPoint07Address } from "viem/account-abstraction";
 import { createSmartAccountClient } from "permissionless";
 import fs from "fs";
 
+import { TacoClient } from "@nucypher/taco";
+
 // Services
 import { ValidationService } from "../services/ValidationService.js";
-
 
 /**
  * Fileverse Agent - A comprehensive file management system with optional encryption
@@ -37,30 +38,30 @@ class Agent {
   DELETED_HASH = "deleted";
   constructor({ chain, viemAccount, pimlicoAPIKey, storageProvider, taco }) {
     // Validate all input parameters
-    console.debug('🚀 Initializing Fileverse Agent...');
-    console.debug('Agent configuration:', {
-      chain: typeof chain === 'string' ? chain : chain?.name,
+    console.debug("🚀 Initializing Fileverse Agent...");
+    console.debug("Agent configuration:", {
+      chain: typeof chain === "string" ? chain : chain?.name,
       accountAddress: viemAccount?.address,
       hasPimlicoAPIKey: !!pimlicoAPIKey,
-      storageProvider: storageProvider?.constructor?.name || 'Unknown',
-      hasTacoConfig: !!taco
+      storageProvider: storageProvider?.constructor?.name || "Unknown",
+      hasTacoConfig: !!taco,
     });
-    
+
     ValidationService.validateAgentConfig({
       chain,
       viemAccount,
       pimlicoAPIKey,
       storageProvider,
     });
-    console.debug('✅ Agent configuration validated');
+    console.debug("✅ Agent configuration validated");
 
     // Store TACo config for potential TacoEncryption creation
     this.tacoConfig = taco;
     if (taco) {
-      console.debug('🔐 TACo configuration provided:', {
+      console.debug("🔐 TACo configuration provided:", {
         domain: taco.domain,
         ritualId: taco.ritualId,
-        hasViemClient: !!taco.viemClient
+        hasViemClient: !!taco.viemClient,
       });
     }
 
@@ -69,19 +70,21 @@ class Agent {
       chain === "gnosis" || chain?.name?.toLowerCase() === "gnosis"
         ? gnosis
         : sepolia;
-    console.debug(`🔗 Chain selected: ${this.chain.name} (ID: ${this.chain.id})`);
-    
+    console.debug(
+      `🔗 Chain selected: ${this.chain.name} (ID: ${this.chain.id})`
+    );
+
     this.pimlicoAPIKey = pimlicoAPIKey;
     this.storageProvider = storageProvider;
     this.viemAccount = viemAccount;
     console.debug(`📁 Storage provider: ${storageProvider?.constructor?.name}`);
 
     // Generate clients
-    console.debug('🔧 Generating blockchain clients...');
+    console.debug("🔧 Generating blockchain clients...");
     const clients = this.generateClients();
     this.publicClient = clients.publicClient;
     this.walletClient = clients.walletClient;
-    console.debug('✅ Blockchain clients generated');
+    console.debug("✅ Blockchain clients generated");
 
     // Set portal registry based on chain
     this.portalRegistry = this.setPortalRegistry();
@@ -108,14 +111,18 @@ class Agent {
         const { createRequire } = await import("module");
         const require = createRequire(import.meta.url);
         TacoModule = require("@nucypher/taco");
-        console.debug('TACo loaded via require (Node.js environment)');
+        console.debug("TACo loaded via require (Node.js environment)");
       } else {
         // Browser environment - use dynamic import
         TacoModule = await import("@nucypher/taco");
-        console.debug('TACo loaded via dynamic import (Browser environment)');
+        console.debug("TACo loaded via dynamic import (Browser environment)");
       }
-      
-      const { TacoClient } = TacoModule;
+
+      const { TacoClient, initialize } = TacoModule;
+
+      // Ensure WASM is initialized before creating TacoClient
+      await initialize();
+
       this._tacoClient = new TacoClient({
         domain: this.tacoConfig.domain,
         ritualId: this.tacoConfig.ritualId,
@@ -281,7 +288,7 @@ class Agent {
       );
       return portalAddress;
     } catch (error) {
-      console.error('❌ Error deploying portal:', error.message);
+      console.error("❌ Error deploying portal:", error.message);
       throw error;
     }
   }
@@ -358,7 +365,10 @@ class Agent {
       }
 
       // Encrypt the content using native TACo condition
-      const messageKit = await tacoClient.encrypt(contentToUpload, options.accessCondition);
+      const messageKit = await tacoClient.encrypt(
+        contentToUpload,
+        options.accessCondition
+      );
       contentToUpload = messageKit.toBytes();
       filename = "encrypted_content.bin";
       isEncrypted = true;
@@ -476,7 +486,10 @@ class Agent {
         try {
           metadata = JSON.parse(metadataContent);
         } catch (parseError) {
-          console.warn(`⚠️ Could not parse metadata as JSON for file ${fileId}:`, parseError.message);
+          console.warn(
+            `⚠️ Could not parse metadata as JSON for file ${fileId}:`,
+            parseError.message
+          );
           metadata = {};
         }
       } else {
@@ -484,7 +497,10 @@ class Agent {
         metadata = metadataContent || {};
       }
     } catch (error) {
-      console.warn(`⚠️ Could not retrieve metadata for file ${fileId}:`, error.message);
+      console.warn(
+        `⚠️ Could not retrieve metadata for file ${fileId}:`,
+        error.message
+      );
       metadata = {};
     }
 
@@ -518,9 +534,11 @@ class Agent {
         const encryptedBytes = await this.storageProvider.downloadBytes(
           fileInfo.contentIpfsHash
         );
-        
+
         // Decrypt with automatic condition context creation
-        const decryptedContent = await tacoClient.decryptWithAutoContext(encryptedBytes);
+        const decryptedContent = await tacoClient.decryptWithAutoContext(
+          encryptedBytes
+        );
 
         return {
           ...fileInfo,
@@ -528,7 +546,9 @@ class Agent {
           decrypted: true,
         };
       } else {
-        console.warn(`⚠️ Encrypted file ${fileId} detected but TACo not configured`);
+        console.warn(
+          `⚠️ Encrypted file ${fileId} detected but TACo not configured`
+        );
         throw new Error(
           "Cannot decrypt encrypted file. TACo configuration required for encrypted file operations."
         );
@@ -609,7 +629,7 @@ class Agent {
       await this.storageProvider.unpin(metadataIpfsHash);
       await this.storageProvider.unpin(contentIpfsHash);
     } catch (error) {
-      console.error('❌ Error unpinning file from storage:', error.message);
+      console.error("❌ Error unpinning file from storage:", error.message);
     }
 
     const transaction = {
@@ -658,7 +678,10 @@ class Agent {
         await this.storageProvider.unpin(metadataIpfsHash);
         await this.storageProvider.unpin(contentIpfsHash);
       } catch (error) {
-        console.error('❌ Error unpinning file from storage during delete:', error.message);
+        console.error(
+          "❌ Error unpinning file from storage during delete:",
+          error.message
+        );
       }
 
       const transaction = {
