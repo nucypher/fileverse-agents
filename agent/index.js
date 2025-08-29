@@ -119,10 +119,9 @@ class Agent {
       }
 
       const { TacoClient, initialize } = TacoModule;
-
+      
       // Ensure WASM is initialized before creating TacoClient
       await initialize();
-
       this._tacoClient = new TacoClient({
         domain: this.tacoConfig.domain,
         ritualId: this.tacoConfig.ritualId,
