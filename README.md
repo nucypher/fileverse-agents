@@ -13,11 +13,10 @@ Access the Fileverse middleware, programmatically. Fileverse's middleware is exp
 With the Fileverse Agents SDK, your agents will have the ability to read, write, and organize data onchain and on IPFS.
 
 Out of the box and by default, your agent will get its own:
-* Safe Smart Account / Multisig: gasless transactions, make your Agent customizable
+* Safe Smart Account / Multisig: gasless transactions, make your Agent customisable
 * Smart Contract on Gnosis: public and permissionless registry of all the agent's outputs
-* Storage space on IPFS: decentralized and content addressing focused for your agent's outputs
+* Storage space on IPFS: decentralised and content addressing focused for your agent's outputs
 * Human-readable .md output: markdown is a format accessible by anyone, humans and other agents
-* **Optional TACo Encryption**: programmable access conditions for encrypted data with threshold cryptography
 
 ## Installation
 
@@ -27,8 +26,10 @@ npm install @fileverse/agents
 
 ## Usage
 
+TEMPORARY NOTE: The code snippet below shows how to create an agent with TACo encryption. The code is for demonstration purpose. There is still a need for some tweaks till next TACo release that contains viem support, TacoClient and a fix for when importing form an ES module. However, to see a working code, check and run the `examples/agent-taco-example.js` file. And you may run it with `npm i && npx ts-node --esm examples/agent-taco-example.js` after you create and fill the `.env` file.
+
 ```javascript
-import { Agent } from '@fileverse/agents';
+import { Agent, TacoProvider } from '@fileverse/agents';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createPublicClient, http } from 'viem';
 import { polygonAmoy } from 'viem/chains';
@@ -37,7 +38,7 @@ import { PinataStorageProvider } from '@fileverse/agents/storage';
 // Create storage provider
 const storageProvider = new PinataStorageProvider({
   jwt: process.env.PINATA_JWT,
-  gateway: process.env.PINATA_GATEWAY
+  gateway: process.env.PINATA_GATEWAY,
 });
 
 // Optional: Create dedicated TACo viem client for Polygon Amoy operations
@@ -53,11 +54,13 @@ const agent = new Agent({
   viemAccount: privateKeyToAccount(process.env.PRIVATE_KEY), // required - viem account instance
   pimlicoAPIKey: process.env.PIMLICO_API_KEY, // required - see how to get API keys below
   storageProvider, // required - storage provider instance
-  taco: { // optional - for encrypted files with programmable access conditions
-    domain: process.env.TACO_DOMAIN, // required - options: 'DEVNET', 'TESTNET', 'MAINNET'
-    ritualId: parseInt(process.env.TACO_RITUAL_ID), // required - TACo ritual ID (e.g., 6 for TESTNET, 27 for DEVNET)
-    viemClient: optionalTacoViemClient // optional - custom viem client for TACo operations (uses agent's client by default)
-  },
+  dataAccessProvider: new TacoProvider({
+    // optional - for encrypted files with programmable access conditions
+    domain: process.env.TACO_DOMAIN, // required - options: 'lynx', 'tapir', 'mainnet'
+    ritualId: parseInt(process.env.TACO_RITUAL_ID), // required - TACo ritual ID (e.g., 6 for tapir, 27 for lynx)
+    viemClient: optionalTacoViemClient, // optional - custom viem client for TACo operations (uses agent's client by default)
+    viemSignerAccount: privateKeyToAccount(process.env.PRIVATE_KEY), // required - viem account or viem wallet client for TACo operations
+  }),
 });
 
 // setup storage with namespace
@@ -80,11 +83,11 @@ const accessCondition = new conditions.base.rpc.RpcCondition({
   chain: 11155111, // Sepolia testnet - where to check the condition
   method: 'eth_getBalance',
   parameters: [':userAddress', 'latest'],
-  returnValueTest: { comparator: '>=', value: 0 }
+  returnValueTest: { comparator: '>=', value: 0 },
 });
 
 const encryptedFile = await agent.create('Secret data', {
-  accessCondition
+  accessCondition,
 });
 console.log(`Encrypted file created: ${encryptedFile}`);
 
@@ -101,13 +104,10 @@ console.log(`Decrypted content: ${decryptedContent.content}`); // Output: "Secre
 // const customViemAccount = privateKeyToAccount('0x...differentPrivateKey');
 // const decryptedWithCustomAccount = await agent.getFileContent(encryptedFile.fileId, customViemAccount);
 
-
-// get the file
-const fileData = await agent.getFile(file.fileId);
-console.log(`File: ${fileData}`);
-
-// update the file
-const updatedFile = await agent.update(file.fileId, 'Hello World 2');
+// update the file - if no encryption conditions was provided the new content will be public
+const updatedFile = await agent.update(file.fileId, 'Hello World 2'{
+  accessCondition,
+});
 console.log(`File updated: ${updatedFile}`);
 
 // delete the file
@@ -129,27 +129,67 @@ sepolia
 ```
 
 
-## TACo Encryption
+## DataAccessProvider
 
-When TACo is configured, you can create encrypted files with programmable access conditions:
+DataAccessProviders enable encrypted file storage with programmable access conditions. The Agent supports different types of data access providers:
+
+### TACo (Threshold Access Control)
+
+When TACo DataAccessProvider is configured, you can create encrypted files with programmable access conditions:
 
 - **Time-based conditions**: files accessible after a specific time
 - **Token balance conditions**: files accessible to users with minimum token balances
+- **NFT ownership conditions**: files accessible to holders of specific NFTs
 - **Custom RPC conditions**: files with complex blockchain-based access logic
 - **Compound conditions**: combine multiple conditions with AND/OR logic
-- **And more** as in https://docs.taco.build/for-developers/references/conditions...
+- **And more** as documented at https://docs.taco.build/for-developers/references/conditions
 
-### TACo Configuration Options
+#### TACo Configuration Options
 
 Supported TACo domains and their characteristics:
 
-- **DEVNET** (`lynx`): Bleeding-edge developer network (Ritual ID: 27, Chain: Polygon Amoy 80002)
-- **TESTNET** (`tapir`): Stable testnet for current TACo release (Ritual ID: 6, Chain: Polygon Amoy 80002)
-- **MAINNET**: Production network (Custom Ritual ID required, Chain: Polygon Mainnet 137)
+- **DEVNET** (`lynx`): Bleeding-edge developer network (Chain: Polygon Amoy 80002)
+- **TESTNET** (`tapir`): Stable testnet for current TACo release (Chain: Polygon Amoy 80002)
+- **MAINNET** (`mainnet`): Production network (Chain: Polygon Mainnet 137)
 
-**Important**: TACo operations occur on Polygon networks, but access conditions can be evaluated on any supported blockchain (Sepolia, Ethereum Mainnet, etc.).
+For current ritual IDs and detailed domain information, see: https://docs.taco.build/for-developers/get-started-with-tac
 
-See the [TACo example](./examples/taco-example.js) for more detailed encryption usage.
+**Important**: TACo operations occur on Polygon networks, so your TACo viem client must connect to the corresponding Polygon chain (Amoy for testnet, Mainnet for production). However, access conditions can be evaluated on any supported blockchain (Sepolia, Ethereum Mainnet, etc.).
+
+**Working Example**: See the [Agent with TACo example](./examples/agent-taco-example.js) for a complete working implementation that demonstrates encryption, decryption, and access control.
+
+## Run Tests
+
+To run the tests, you need to have something like the following environment variables set.
+Create a `.env` file in the root directory of the project.
+
+```bash
+# Keys
+PRIVATE_KEY=[FILL_YOUR_PRIVATE_KEY_HERE]
+
+# Pinata
+PINATA_GATEWAY=[FILL_YOUR_PINATA_GATEWAY_HERE]
+
+# Pimlico
+PIMLICO_API_KEY=[FILL_YOUR_PIMLICO_API_KEY_HERE]
+
+# TACo
+TACO_DOMAIN=tapir
+TACO_RITUAL_ID=6
+TACO_CHAIN_ID=11155111
+
+# Agent
+AGENT_CHAIN=sepolia
+
+```
+
+Run the tests:
+
+```bash
+npm i && npm run test
+```
+
+
 
 ---
 

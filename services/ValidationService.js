@@ -9,31 +9,26 @@ export class ValidationService {
   /**
    * Validate Agent constructor parameters
    */
-  static validateAgentConfig({ chain, viemAccount, pimlicoAPIKey, storageProvider, taco }) {
+  static validateAgentConfig({ chain, viemAccount, pimlicoAPIKey, storageProvider }) {
     // Validate required parameters
     if (!chain) {
       throw new Error(ERROR_MESSAGES.CHAIN_REQUIRED);
     }
-    
+
     if (!viemAccount) {
       throw new Error(ERROR_MESSAGES.ACCOUNT_REQUIRED);
     }
-    
+
     if (!pimlicoAPIKey || typeof pimlicoAPIKey !== 'string') {
       throw new Error(ERROR_MESSAGES.PIMLICO_KEY_REQUIRED);
     }
-    
+
     if (!storageProvider) {
       throw new Error(ERROR_MESSAGES.STORAGE_PROVIDER_REQUIRED);
     }
-    
+
     // Validate chain
     this.validateChain(chain);
-    
-    // Validate TACo configuration if provided
-    if (taco) {
-      this.validateTacoConfig(taco);
-    }
   }
 
   /**
@@ -41,26 +36,13 @@ export class ValidationService {
    */
   static validateChain(chain) {
     const chainName = typeof chain === 'string' ? chain : chain?.name?.toLowerCase();
-    
+
     if (!NETWORK_CONFIG.SUPPORTED_CHAINS.includes(chainName)) {
-      throw new Error(`Unsupported chain: ${chainName}. Supported chains: ${NETWORK_CONFIG.SUPPORTED_CHAINS.join(', ')}`);
+      throw new Error(
+        `Unsupported chain: ${chainName}. Supported chains: ${NETWORK_CONFIG.SUPPORTED_CHAINS.join(', ')}`
+      );
     }
   }
-
-  /**
-   * Validate TACo configuration
-   */
-  static validateTacoConfig(taco) {
-    if (typeof taco.ritualId !== 'number' || taco.ritualId < 0) {
-      throw new Error(ERROR_MESSAGES.TACO_RITUAL_ID_INVALID);
-    }
-    
-    if (taco.domain && typeof taco.domain !== 'string') {
-      throw new Error(ERROR_MESSAGES.TACO_DOMAIN_INVALID);
-    }
-  }
-
-
 
   /**
    * Validate file ID
@@ -103,7 +85,7 @@ export class ValidationService {
     }
 
     const requiredMethods = ['upload', 'download', 'downloadBytes', 'unpin', 'protocol', 'isConnected'];
-    
+
     for (const method of requiredMethods) {
       if (typeof provider[method] !== 'function') {
         throw new Error(`Storage provider must implement ${method} method`);

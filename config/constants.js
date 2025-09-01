@@ -2,10 +2,18 @@
  * Configuration constants for the Fileverse Agents SDK
  */
 
-
 // Network configuration
 export const NETWORK_CONFIG = {
   SUPPORTED_CHAINS: ["gnosis", "sepolia"],
+};
+
+// FileType enum based on FileversePortal contract
+// https://github.com/fileverse/fileverse-smartcontracts/blob/main/contracts/FileversePortal.sol#L42
+export const FileType = {
+  PUBLIC: 0,
+  PRIVATE: 1,
+  GATED: 2,
+  MEMBER_PRIVATE: 3,
 };
 
 // Error messages
@@ -20,5 +28,5 @@ export const ERROR_MESSAGES = {
   TACO_NOT_INITIALIZED: "TACo is not initialized",
   CONDITION_CONFIG_INVALID: "Condition configuration must be a valid object",
   CONDITION_TYPE_REQUIRED: "Condition type is required and must be a string",
-  INVALID_FILE_ID: "Invalid file ID provided"
+  INVALID_FILE_ID: "Invalid file ID provided",
 };

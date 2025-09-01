@@ -4,14 +4,15 @@ import {
   SwarmStorageProvider,
   BaseStorageProvider,
 } from "./storage/index.js";
-import { PortalRegistryABI, PortalABI } from "./abi/index.js";
+import { DataAccessProvider, TacoProvider } from "./data-access/index.js";
 
 export {
   Agent,
   PinataStorageProvider,
   SwarmStorageProvider,
-  PortalRegistryABI,
-  PortalABI,
+  BaseStorageProvider,
+  DataAccessProvider,
+  TacoProvider,
 };
 
 export default {
@@ -19,4 +20,6 @@ export default {
   BaseStorageProvider,
   PinataStorageProvider,
   SwarmStorageProvider,
+  DataAccessProvider,
+  TacoProvider,
 };
