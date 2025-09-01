@@ -5,7 +5,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "mocha --loader=ts-node/esm 'test/**/*.{js,ts}'"
+    "test": "mocha --loader=ts-node/esm 'test/**/*.{js,ts}'",
+    "test:agent-taco": "mocha --loader=ts-node/esm test/FileverseAgent-TACo.test",
+    "test:pinata": "mocha --loader=ts-node/esm test/PinataStorageProvider.test.js"
   },
   "bin": "./bin/cli.js",
   "keywords": [
@@ -47,6 +49,7 @@
     "@types/node": "^22.10.7",
     "chai": "^5.1.2",
     "mocha": "^11.0.1",
+    "prettier": "^3.6.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
   }
