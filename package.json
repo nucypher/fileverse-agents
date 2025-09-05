@@ -1,11 +1,13 @@
 {
   "name": "@fileverse/agents",
   "version": "2.0.1",
-  "description": "Interface to use fileverse infra programmatically",
+  "description": "Interface to use fileverse infra programmatically - Fileverse Agents SDK with blockchain integration, IPFS storage, and optional TACo encryption",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "mocha --loader=ts-node/esm 'test/**/*.{js,ts}'"
+    "test": "mocha --loader=ts-node/esm 'test/**/*.{js,ts}'",
+    "test:agent-taco": "mocha --loader=ts-node/esm test/FileverseAgent-TACo.test",
+    "test:pinata": "mocha --loader=ts-node/esm test/PinataStorageProvider.test.js"
   },
   "bin": "./bin/cli.js",
   "keywords": [
@@ -13,7 +15,12 @@
     "AI",
     "fileverse",
     "infra",
-    "onchain"
+    "onchain",
+    "encryption",
+    "TACo Threshold Access Control",
+    "blockchain",
+    "IPFS",
+    "storage"
   ],
   "repository": {
     "type": "git",
@@ -23,13 +30,16 @@
   "license": "MIT",
   "dependencies": {
     "@ethersphere/bee-js": "^9.0.2",
+    "@nucypher/shared": "file:../../taco/taco-web/packages/shared",
+    "@nucypher/taco": "file:../../taco/taco-web/packages/taco",
+    "@nucypher/taco-auth": "file:../../taco/taco-web/packages/taco-auth",
     "@ucans/ucans": "^0.12.0",
     "crypto": "^1.0.1",
-    "dotenv": "^16.4.7",
+    "dotenv": "^16.6.1",
     "figlet": "^1.8.0",
     "js-base64": "^3.7.7",
     "permissionless": "^0.2.28",
-    "pinata-web3": "^0.5.4",
+    "pinata": "^2.4.9",
     "viem": "^2.22.10",
     "yargs": "^17.7.2"
   },
@@ -39,6 +49,7 @@
     "@types/node": "^22.10.7",
     "chai": "^5.1.2",
     "mocha": "^11.0.1",
+    "prettier": "^3.6.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
   }

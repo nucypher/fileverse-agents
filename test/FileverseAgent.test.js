@@ -6,7 +6,7 @@ import { sepolia } from 'viem/chains';
 import { Agent as FileverseAgent, PinataStorageProvider } from '../index.js';
 
 describe('FileverseAgent', () => {
-  let agent; 
+  let agent;
   let fileId;
 
   beforeEach(() => {
