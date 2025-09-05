@@ -13,35 +13,27 @@ import { entryPoint07Address } from "viem/account-abstraction";
 import { createSmartAccountClient } from "permissionless";
 import fs from "fs";
 
-import { TacoClient } from "@nucypher/taco";
+import { FileType } from "../config/constants.js";
 
 // Services
 import { ValidationService } from "../services/ValidationService.js";
-
-// FileType enum based on FileversePortal contract
-// https://github.com/fileverse/fileverse-smartcontracts/blob/main/contracts/FileversePortal.sol#L42
-const FileType = {
-  PUBLIC: 0,
-  PRIVATE: 1,
-  GATED: 2,
-  MEMBER_PRIVATE: 3,
-};
 
 /**
  * Fileverse Agent - A comprehensive file management system with optional encryption
  *
  * @class Agent
  * @description The Agent class provides functionality for creating, reading, updating, and deleting
- * files with blockchain integration. When TACo configuration is provided, it automatically
- * handles encrypted files using TacoClient internally.
+ * files with blockchain integration. When a data access provider is provided,
+ * it automatically handles encrypted files using the provider pattern.
  *
  * Features:
  * - Public file operations (create, read, update, delete)
- * - Optional TACo-based encryption with programmable access conditions
+ * - Optional encryption with programmable access conditions via data access providers
+ * - Pluggable provider architecture for different encryption backends
  * - Smart contract integration for on-chain metadata
  * - IPFS storage support via Pinata
  * - Account abstraction with Safe Wallets
- * - Transparent encryption/decryption when TACo is configured
+ * - Transparent encryption/decryption when data access provider is configured
  */
 class Agent {
   DELETED_HASH = "deleted";
@@ -50,7 +42,7 @@ class Agent {
     viemAccount,
     pimlicoAPIKey,
     storageProvider,
-    tacoConfig,
+    dataAccessProvider,
   }) {
     // Validate all input parameters
     console.debug("🚀 Initializing Fileverse Agent...");
@@ -59,7 +51,7 @@ class Agent {
       accountAddress: viemAccount?.address,
       hasPimlicoAPIKey: !!pimlicoAPIKey,
       storageProvider: storageProvider?.constructor?.name || "Unknown",
-      hasTacoConfig: !!tacoConfig,
+      hasDataAccessProvider: !!dataAccessProvider,
     });
 
     ValidationService.validateAgentConfig({
@@ -68,6 +60,7 @@ class Agent {
       pimlicoAPIKey,
       storageProvider,
     });
+
     console.debug("✅ Agent configuration validated");
 
     // Set core properties
@@ -91,23 +84,14 @@ class Agent {
     this.walletClient = clients.walletClient;
     console.debug("✅ Blockchain clients generated");
 
-    // Initialize TacoClient after clients are available
-    if (tacoConfig) {
-      console.debug("🔐 TACo configuration provided:", {
-        domain: tacoConfig.domain,
-        ritualId: tacoConfig.ritualId,
-        hasViemClient: !!tacoConfig.viemClient,
+    // Initialize data access provider
+    if (dataAccessProvider) {
+      console.debug("🔐 Data access provider provided:", {
+        type: dataAccessProvider.getProviderType(),
       });
-
-      TacoClient.initialize();
-
-      this.tacoClient = new TacoClient({
-        domain: tacoConfig.domain,
-        ritualId: tacoConfig.ritualId,
-        viemClient: tacoConfig.viemClient || this.publicClient,
-        viemAccount: this.viemAccount,
-      });
-      console.debug("✅ TacoClient initialized successfully");
+      this.dataAccessProvider = dataAccessProvider;
+      // Defer validation to first use to avoid blocking constructor
+      this._providerValidated = false;
     }
 
     // Set portal registry based on chain
@@ -297,7 +281,7 @@ class Agent {
    *
    * @param {string|object} output - The file content (string for text, object for JSON)
    * @param {object} options - Configuration options
-   * @param {object} [options.accessCondition] - TACo access condition for encryption. It could be a composite or a simple access condition.
+   * @param {object} [options.accessCondition] - Access condition for encryption. It could be a composite or a simple access condition.
    * @returns {Promise<object>} File creation result with fileId, hash, encrypted status
    * @throws {Error} If validation fails
    *
@@ -306,7 +290,7 @@ class Agent {
    * const result = await agent.create('Hello World');
    *
    * @example
-   * // Create encrypted file with time-based access condition (requires TACo config)
+   * // Create encrypted file with time-based access condition (while using TACo as the data access provider)
    * const result = await agent.create('Secret content', {
    *   accessCondition: {
    *     type: 'time',
@@ -334,26 +318,37 @@ class Agent {
     let contentToUpload = output;
     let filename = "output.md";
     let isEncrypted = false;
-    let tacoRitualId = null;
+    let dataAccessMetadata = null;
     let filetype = FileType.PUBLIC;
 
     // Handle encryption if accessCondition is provided
     if (options.accessCondition) {
-      if (!this.tacoClient) {
+      if (!this.dataAccessProvider) {
         throw new Error(
-          `TACo configuration is required for encrypted files. Please provide a valid TACo configuration in the Agent constructor.`
+          `Data access provider is required for encrypted files. Please provide a dataAccessProvider in the Agent constructor.`
         );
       }
 
-      // Encrypt the content using native TACo condition
-      const messageKit = await this.tacoClient.encrypt(
+      // Validate provider on first use
+      if (!this._providerValidated) {
+        await this.dataAccessProvider.validateConfig();
+        this._providerValidated = true;
+      }
+
+      // Encrypt the content using the provider
+      const encryptedBytes = await this.dataAccessProvider.encrypt(
         contentToUpload,
         options.accessCondition
       );
-      contentToUpload = messageKit.toBytes();
+      contentToUpload = encryptedBytes;
       filename = "encrypted_content.bin";
       isEncrypted = true;
-      tacoRitualId = this.tacoClient.getConfig().ritualId;
+
+      // Get metadata config from data access provider
+      if (this.dataAccessProvider) {
+        dataAccessMetadata = this.dataAccessProvider.getMetadataConfig();
+      }
+
       filetype = FileType.PRIVATE;
     }
 
@@ -370,12 +365,8 @@ class Agent {
         ? "Encrypted Markdown file created by FileverseAgent"
         : "Markdown file created by FileverseAgent",
       encrypted: isEncrypted,
+      ...(dataAccessMetadata && { dataAccessConfig: dataAccessMetadata }),
     };
-
-    // Add TACo-specific metadata if encrypted
-    if (isEncrypted) {
-      metadata.tacoRitualId = tacoRitualId;
-    }
 
     const metadataIpfsHash = await this.uploadToStorage(
       "metadata.json",
@@ -503,16 +494,22 @@ class Agent {
     ValidationService.validateFileId(fileId);
     const fileInfo = await this.getFile(fileId);
 
-    // Use TacoClient for encrypted files
+    // Use data access provider for encrypted files
     if (fileInfo.metadata.encrypted) {
-      if (this.tacoClient) {
+      if (this.dataAccessProvider) {
+        // Validate provider on first use
+        if (!this._providerValidated) {
+          await this.dataAccessProvider.validateConfig();
+          this._providerValidated = true;
+        }
+
         // Download encrypted bytes and decrypt
         const encryptedBytes = await this.storageProvider.downloadBytes(
           fileInfo.contentIpfsHash
         );
 
         // Decrypt with proper context
-        const decryptedBytes = await this.tacoClient.decrypt(
+        const decryptedBytes = await this.dataAccessProvider.decrypt(
           encryptedBytes,
           conditionContext
         );
@@ -527,10 +524,10 @@ class Agent {
         };
       } else {
         console.warn(
-          `Encrypted file ${fileId} detected but TACo not configured`
+          `Encrypted file ${fileId} detected but no data access provider configured`
         );
         throw new Error(
-          "Cannot decrypt encrypted file. TACo configuration required for encrypted file operations."
+          "Cannot decrypt encrypted file. Data access provider required for encrypted file operations."
         );
       }
     }
@@ -566,7 +563,7 @@ class Agent {
    * @param {string|number|bigint} fileId - The file ID to update
    * @param {string|object} output - The new file content
    * @param {object} options - Configuration options
-   * @param {object} [options.accessCondition] - TACo access condition for encryption
+   * @param {object} [options.accessCondition] - Access condition for encryption
    * @returns {Promise<object>} Transaction result
    */
   async update(fileId, output, options = {}) {
@@ -581,28 +578,39 @@ class Agent {
     let contentToUpload = output;
     let filename = "output.md";
     let isEncrypted = false;
-    let tacoRitualId = null;
+    let dataAccessMetadata = null;
 
     let filetype = FileType.PUBLIC;
 
     // Handle encryption if accessCondition is provided
     if (options.accessCondition) {
-      if (!this.tacoClient) {
+      if (!this.dataAccessProvider) {
         throw new Error(
-          `TACo configuration is required for encrypted files. Please provide a valid TACo configuration in the Agent constructor.`
+          `Data access provider is required for encrypted files. Please provide a dataAccessProvider in the Agent constructor.`
         );
       }
 
-      // Encrypt the content using native TACo condition
-      const messageKit = await this.tacoClient.encrypt(
+      // Validate provider on first use
+      if (!this._providerValidated) {
+        await this.dataAccessProvider.validateConfig();
+        this._providerValidated = true;
+      }
+
+      // Encrypt the content using the provider
+      const encryptedBytes = await this.dataAccessProvider.encrypt(
         contentToUpload,
         options.accessCondition
       );
-      contentToUpload = messageKit.toBytes();
+      contentToUpload = encryptedBytes;
       filename = "encrypted_content.bin";
       isEncrypted = true;
-      tacoRitualId = this.tacoClient.getConfig().ritualId;
-      filetype = FileType.PRIVATE; // Use PRIVATE for TACo encrypted files
+
+      // Get metadata config from data access provider
+      if (this.dataAccessProvider) {
+        dataAccessMetadata = this.dataAccessProvider.getMetadataConfig();
+      }
+
+      filetype = FileType.PRIVATE; // Use PRIVATE for encrypted files
     }
 
     const contentIpfsHash = await this.uploadToStorage(
@@ -617,7 +625,7 @@ class Agent {
         : "Updated Markdown file by FileverseAgent",
       contentIpfsHash,
       encrypted: isEncrypted,
-      ...(tacoRitualId && { tacoRitualId }),
+      ...(dataAccessMetadata && { dataAccessConfig: dataAccessMetadata }),
     };
     const metadataIpfsHash = await this.uploadToStorage(
       "metadata.json",
@@ -657,6 +665,33 @@ class Agent {
       portalAddress: this.portal.portalAddress,
     };
     return transaction;
+  }
+
+  /**
+   * Check if the agent has a data access provider configured
+   * @returns {boolean} True if data access provider is available
+   */
+  hasDataAccessProvider() {
+    return !!this.dataAccessProvider;
+  }
+
+  /**
+   * Get the configured data access provider
+   * @returns {DataAccessProvider|null} The configured provider or null
+   */
+  getDataAccessProvider() {
+    return this.dataAccessProvider || null;
+  }
+
+  /**
+   * Get information about the configured data access provider
+   * @returns {object|null} Provider configuration info or null
+   */
+  getDataAccessProviderInfo() {
+    if (!this.dataAccessProvider) {
+      return null;
+    }
+    return this.dataAccessProvider.getConfig();
   }
 
   /**

@@ -12,7 +12,7 @@ import { createPublicClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygonAmoy } from 'viem/chains';
 import { conditions, ThresholdMessageKit } from '@nucypher/taco';
-import { ViemEIP4361AuthProvider } from '@nucypher/taco-auth';
+import { EIP4361AuthProvider } from '@nucypher/taco-auth';
 import 'dotenv/config';
 
 async function agentWithTacoExample() {
@@ -138,7 +138,7 @@ async function agentWithTacoExample() {
     );
 
     const conditionContext = conditions.context.ConditionContext.fromMessageKit(messageKit);
-    const authProvider = await ViemEIP4361AuthProvider.create(agent.publicClient, agent.viemAccount);
+    const authProvider = await EIP4361AuthProvider.create(agent.publicClient, agent.viemAccount);
     conditionContext.addAuthProvider(':userAddress', authProvider);
 
     const decryptedContent = await agent.getFileContent(balanceGatedFile.fileId, conditionContext);

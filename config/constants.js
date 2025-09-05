@@ -7,6 +7,15 @@ export const NETWORK_CONFIG = {
   SUPPORTED_CHAINS: ["gnosis", "sepolia"],
 };
 
+// FileType enum based on FileversePortal contract
+// https://github.com/fileverse/fileverse-smartcontracts/blob/main/contracts/FileversePortal.sol#L42
+export const FileType = {
+  PUBLIC: 0,
+  PRIVATE: 1,
+  GATED: 2,
+  MEMBER_PRIVATE: 3,
+};
+
 // Error messages
 export const ERROR_MESSAGES = {
   CHAIN_REQUIRED: "Chain is required - options: gnosis, sepolia",
