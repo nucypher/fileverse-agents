@@ -66,10 +66,6 @@ class PinataStorageProvider extends BaseStorageProvider {
       // Step 3: Delete the file using its ID
       await this.pinata.files.public.delete([fileId]);
 
-      console.log(
-        `Successfully unpinned file with CID: ${strippedReference} (ID: ${fileId})`
-      );
-
       return `${protocol}${strippedReference}`;
     } catch (error) {
       throw new Error(
@@ -114,8 +110,6 @@ class PinataStorageProvider extends BaseStorageProvider {
       : `https://${gateway}/ipfs/${strippedReference}`;
 
     try {
-      console.log(`Downloading binary data from: ${url}`);
-
       const response = await fetch(url, {
         method: "GET",
         headers: {
@@ -143,7 +137,6 @@ class PinataStorageProvider extends BaseStorageProvider {
         throw new Error("Empty or invalid binary data received");
       }
 
-      console.log(`Successfully downloaded ${arrayBuffer.byteLength} bytes`);
       return new Uint8Array(arrayBuffer);
     } catch (error) {
       const enhancedError = new Error(
@@ -153,7 +146,6 @@ class PinataStorageProvider extends BaseStorageProvider {
       enhancedError.reference = reference;
       enhancedError.url = url;
 
-      console.error("Error downloading bytes from IPFS:", enhancedError);
       throw enhancedError;
     }
   }

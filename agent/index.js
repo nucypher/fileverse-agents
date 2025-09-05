@@ -45,15 +45,6 @@ class Agent {
     dataAccessProvider,
   }) {
     // Validate all input parameters
-    console.debug("🚀 Initializing Fileverse Agent...");
-    console.debug("Agent configuration:", {
-      chain: typeof chain === "string" ? chain : chain?.name,
-      accountAddress: viemAccount?.address,
-      hasPimlicoAPIKey: !!pimlicoAPIKey,
-      storageProvider: storageProvider?.constructor?.name || "Unknown",
-      hasDataAccessProvider: !!dataAccessProvider,
-    });
-
     ValidationService.validateAgentConfig({
       chain,
       viemAccount,
@@ -61,34 +52,22 @@ class Agent {
       storageProvider,
     });
 
-    console.debug("✅ Agent configuration validated");
-
     // Set core properties
     this.chain =
       chain === "gnosis" || chain?.name?.toLowerCase() === "gnosis"
         ? gnosis
         : sepolia;
-    console.debug(
-      `🔗 Chain selected: ${this.chain.name} (ID: ${this.chain.id})`
-    );
 
     this.pimlicoAPIKey = pimlicoAPIKey;
     this.storageProvider = storageProvider;
     this.viemAccount = viemAccount;
-    console.debug(`📁 Storage provider: ${storageProvider?.constructor?.name}`);
 
-    // Generate clients
-    console.debug("🔧 Generating blockchain clients...");
     const clients = this.generateClients();
     this.publicClient = clients.publicClient;
     this.walletClient = clients.walletClient;
-    console.debug("✅ Blockchain clients generated");
 
     // Initialize data access provider
     if (dataAccessProvider) {
-      console.debug("🔐 Data access provider provided:", {
-        type: dataAccessProvider.getProviderType(),
-      });
       this.dataAccessProvider = dataAccessProvider;
       // Defer validation to first use to avoid blocking constructor
       this._providerValidated = false;
@@ -96,10 +75,8 @@ class Agent {
 
     // Set portal registry based on chain
     this.portalRegistry = this.setPortalRegistry();
-    console.debug(`📜 Portal registry: ${this.portalRegistry}`);
 
     this.owner = this.viemAccount.address;
-    console.debug(`✅ Agent initialized for address: ${this.owner}`);
   }
 
   /**
@@ -188,7 +165,7 @@ class Agent {
     try {
       const storage = await this.loadStorage(this.namespace);
       if (storage && storage.namespace === this.namespace) {
-        console.debug(`🔍 Storage already exists for namespace: ${namespace}`);
+        console.log(`🔍 Storage already exists for namespace: ${namespace}`);
         this.portal = storage;
         return storage.portalAddress;
       }
@@ -523,9 +500,6 @@ class Agent {
           decrypted: true,
         };
       } else {
-        console.warn(
-          `Encrypted file ${fileId} detected but no data access provider configured`
-        );
         throw new Error(
           "Cannot decrypt encrypted file. Data access provider required for encrypted file operations."
         );
@@ -733,7 +707,7 @@ class Agent {
         await this.storageProvider.unpin(contentIpfsHash);
       } catch (error) {
         console.error(
-          "Error unpinning file from storage during delete:",
+          "Error unpinning file (id: ${fileId}) from storage during delete:",
           error
         );
       }
