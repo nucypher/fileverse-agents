@@ -82,6 +82,52 @@ gnosis
 sepolia
 ```
 
+## Storage Providers
+
+### Pinata
+
+```javascript
+const storageProvider = new PinataStorageProvider({
+  jwt: process.env.PINATA_JWT,
+  gateway: process.env.PINATA_GATEWAY,
+});
+```
+
+### Swarm
+
+```javascript
+const storageProvider = new SwarmStorageProvider({
+  viemClient: viemClient,
+});
+```
+
+## Run Tests
+
+To run the tests, you need to have something like the following environment variables set.
+Create a `.env` file in the root directory of the project.
+
+```bash
+# Keys
+PRIVATE_KEY=[FILL_YOUR_PRIVATE_KEY_HERE]
+
+# Pinata
+PINATA_GATEWAY=[FILL_YOUR_PINATA_GATEWAY_HERE]
+
+# Pimlico
+PIMLICO_API_KEY=[FILL_YOUR_PIMLICO_API_KEY_HERE]
+
+# Agent
+AGENT_CHAIN=sepolia
+
+```
+
+Run the tests:
+
+```bash
+npm i && npm run test
+```
+
+---
 
 PS: Remember to put creds directory in your .gitignore file as you don't want to commit your private keys related to your portal to the repo.
 
