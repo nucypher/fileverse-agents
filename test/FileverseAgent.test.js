@@ -6,7 +6,7 @@ import { sepolia } from 'viem/chains';
 import { Agent as FileverseAgent, PinataStorageProvider } from '../index.js';
 
 describe('FileverseAgent', () => {
-  let agent; 
+  let agent;
   let fileId;
 
   beforeEach(() => {
@@ -29,7 +29,9 @@ describe('FileverseAgent', () => {
     expect(agent.chain.name).to.equal('Sepolia');
     expect(agent.publicClient).to.exist;
     expect(agent.walletClient).to.exist;
-    expect(agent.portalRegistry).to.equal('0x8D9E28AC21D823ddE63fbf20FAD8EdD4F4a0cCfD');
+    expect(agent.portalRegistry).to.equal(
+      '0x8D9E28AC21D823ddE63fbf20FAD8EdD4F4a0cCfD'
+    );
     expect(agent.viemAccount).to.exist;
     expect(agent.storageProvider).to.exist;
   });

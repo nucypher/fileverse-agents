@@ -1,15 +1,15 @@
-import { Bee } from "@ethersphere/bee-js";
-import { BaseStorageProvider } from "./base.js";
+import { Bee } from '@ethersphere/bee-js';
+import { BaseStorageProvider } from './base.js';
 
 class SwarmStorageProvider extends BaseStorageProvider {
   constructor({ beeUrl, postageBatchId }) {
     super();
     if (!beeUrl) {
-      throw new Error("Bee node URL is required");
+      throw new Error('Bee node URL is required');
     }
     if (!postageBatchId) {
       throw new Error(
-        "Postage batch ID is required for uploading data to Swarm"
+        'Postage batch ID is required for uploading data to Swarm'
       );
     }
     this.bee = new Bee(beeUrl);
@@ -17,14 +17,14 @@ class SwarmStorageProvider extends BaseStorageProvider {
   }
 
   async protocol() {
-    return "bzz://";
+    return 'bzz://';
   }
 
   async upload(fileName, content) {
     try {
       const protocol = await this.protocol();
       // Create a File object from the content
-      const file = new File([content], fileName, { type: "text/plain" });
+      const file = new File([content], fileName, { type: 'text/plain' });
 
       // Upload the file to Swarm
       const result = await this.bee.uploadFile(
@@ -39,7 +39,7 @@ class SwarmStorageProvider extends BaseStorageProvider {
       // Return the Swarm reference as a URI
       return `${protocol}${result.reference}`;
     } catch (error) {
-      console.error("Error uploading to Swarm:", error);
+      console.error('Error uploading to Swarm:', error);
       throw error;
     }
   }
@@ -48,13 +48,13 @@ class SwarmStorageProvider extends BaseStorageProvider {
     try {
       const protocol = await this.protocol();
       const strippedReference =
-        typeof reference === "string"
-          ? reference.replace(protocol, "")
+        typeof reference === 'string'
+          ? reference.replace(protocol, '')
           : reference;
       const result = await this.bee.unpin(strippedReference);
       return `${protocol}${result.reference}`;
     } catch (error) {
-      console.error("Error unpinning from Swarm:", error);
+      console.error('Error unpinning from Swarm:', error);
       throw error;
     }
   }
@@ -63,13 +63,13 @@ class SwarmStorageProvider extends BaseStorageProvider {
     try {
       const protocol = await this.protocol();
       const strippedReference =
-      typeof reference === "string"
-        ? reference.replace(protocol, "")
-        : reference;
+        typeof reference === 'string'
+          ? reference.replace(protocol, '')
+          : reference;
       const result = await this.bee.downloadFile(strippedReference);
       return result;
     } catch (error) {
-      console.error("Error downloading from Swarm:", error);
+      console.error('Error downloading from Swarm:', error);
       throw error;
     }
   }

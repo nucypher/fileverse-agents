@@ -5,7 +5,7 @@ class PinataStorageProvider extends BaseStorageProvider {
   constructor({ pinataJWT, pinataGateway }) {
     super();
     if (!pinataJWT || !pinataGateway) {
-      throw new Error("Pinata JWT and gateway are required");
+      throw new Error('Pinata JWT and gateway are required');
     }
     this.pinata = new PinataSDK({
       pinataJwt: pinataJWT,
@@ -14,7 +14,7 @@ class PinataStorageProvider extends BaseStorageProvider {
   }
 
   async protocol() {
-    return "ipfs://";
+    return 'ipfs://';
   }
 
   async upload(fileName, content) {
@@ -24,7 +24,7 @@ class PinataStorageProvider extends BaseStorageProvider {
       const result = await this.pinata.upload.file(file);
       return `${protocol}${result.IpfsHash}`;
     } catch (error) {
-      console.error("Error uploading to IPFS:", error);
+      console.error('Error uploading to IPFS:', error);
       throw error;
     }
   }
@@ -47,8 +47,8 @@ class PinataStorageProvider extends BaseStorageProvider {
   async download(reference) {
     const protocol = await this.protocol();
     const strippedReference =
-      typeof reference === "string"
-        ? reference.replace(protocol, "")
+      typeof reference === 'string'
+        ? reference.replace(protocol, '')
         : reference;
     const result = await this.pinata.download.file(strippedReference);
     return result;
@@ -59,7 +59,7 @@ class PinataStorageProvider extends BaseStorageProvider {
       const result = await this.pinata.testAuthentication();
       return result;
     } catch (error) {
-      console.error("Error testing Pinata auth:", error);
+      console.error('Error testing Pinata auth:', error);
       return false;
     }
   }

@@ -1,19 +1,19 @@
-import * as ucans from "@ucans/ucans";
-import { Base64 } from "js-base64";
-import { fromUint8Array } from "js-base64";
-import { generateKeyPairSync } from "crypto";
-import { sha256 } from "viem";
+import * as ucans from '@ucans/ucans';
+import { Base64 } from 'js-base64';
+import { fromUint8Array } from 'js-base64';
+import { generateKeyPairSync } from 'crypto';
+import { sha256 } from 'viem';
 
 const generateRandomRSAKeyPair = async () => {
-  const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', {
     modulusLength: 4096,
     publicKeyEncoding: {
-      type: "spki",
-      format: "der",
+      type: 'spki',
+      format: 'der',
     },
     privateKeyEncoding: {
-      type: "pkcs8",
-      format: "der",
+      type: 'pkcs8',
+      format: 'der',
     },
   });
   return { publicKey, privateKey };
@@ -86,19 +86,20 @@ const generatePortalKeys = async () => {
 };
 
 async function getAuthToken(contractAddress, editSecret, recipientDID) {
-  console.log("editSecret: ", editSecret);
+  console.log('editSecret: ', editSecret);
   const editKeypair = ucans.EdKeypair.fromSecretKey(editSecret);
   const ucan = await ucans.build({
     audience: recipientDID, // recipient DID
     issuer: editKeypair, // signing key
-    capabilities: [ // permissions for ucan
+    capabilities: [
+      // permissions for ucan
       {
-        with: { scheme: "storage", hierPart: `${contractAddress}` },
-        can: { namespace: "file", segments: [ "CREATE" ] }
+        with: { scheme: 'storage', hierPart: `${contractAddress}` },
+        can: { namespace: 'file', segments: ['CREATE'] },
       },
-    ]
-  })
-  const token = ucans.encode(ucan) // base64 jwt-formatted auth token
+    ],
+  });
+  const token = ucans.encode(ucan); // base64 jwt-formatted auth token
   return token;
 }
 
@@ -109,5 +110,5 @@ export {
   exportKeyPair,
   getPortalKeyVerifiers,
   generatePortalKeys,
-  getAuthToken
+  getAuthToken,
 };

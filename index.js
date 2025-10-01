@@ -1,9 +1,9 @@
-import { Agent } from "./agent/index.js";
+import { Agent } from './agent/index.js';
 import {
   PinataStorageProvider,
   SwarmStorageProvider,
   BaseStorageProvider,
-} from "./storage/index.js";
+} from './storage/index.js';
 
 export {
   Agent,
