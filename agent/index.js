@@ -276,7 +276,7 @@ class Agent {
     const contentIpfsHash = await this.uploadToStorage("output.md", output);
 
     const metadata = {
-      name: "output.md",
+      name: `${this.portal.portalAddress}/${this.namespace}/${filename}`,
       description: "Updated Markdown file by FileverseAgent",
       contentIpfsHash,
     };
@@ -297,6 +297,9 @@ class Agent {
         ],
       }]
     });
+
+    // Wait for the user operation to be mined to ensure on-chain state is updated
+    await this.smartAccountClient.waitForUserOperationReceipt({ hash });
 
     // try to unpin the file content and metadata
     try {
@@ -339,6 +342,9 @@ class Agent {
         ],
       }]
     });
+
+      // Wait for user operation receipt to ensure deletion is finalized on-chain
+      await this.smartAccountClient.waitForUserOperationReceipt({ hash });
 
     try {
       const { metadataIpfsHash, contentIpfsHash } = fileBeforeDelete;
