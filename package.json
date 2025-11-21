@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "mocha --loader=ts-node/esm 'test/**/*.{js,ts}'",
-    "test:pinata": "mocha --loader=ts-node/esm test/PinataStorageProvider.test"
+    "test:pinata": "mocha --loader=ts-node/esm test/PinataStorageProvider.test",
+    "test:agent-taco": "mocha --loader=ts-node/esm test/FileverseAgent-TACo.test"
   },
   "bin": "./bin/cli.js",
   "keywords": [
@@ -14,7 +15,12 @@
     "AI",
     "fileverse",
     "infra",
-    "onchain"
+    "onchain",
+    "encryption",
+    "TACo Threshold Access Control",
+    "blockchain",
+    "IPFS",
+    "storage"
   ],
   "repository": {
     "type": "git",
@@ -24,6 +30,9 @@
   "license": "MIT",
   "dependencies": {
     "@ethersphere/bee-js": "^9.0.2",
+    "@nucypher/shared": "^0.6.0-dev.viem",
+    "@nucypher/taco": "^0.7.0-dev.viem",
+    "@nucypher/taco-auth": "^0.4.0-dev.viem",
     "@ucans/ucans": "^0.12.0",
     "crypto": "^1.0.1",
     "dotenv": "^16.4.7",
