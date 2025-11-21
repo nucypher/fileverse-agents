@@ -15,7 +15,13 @@ import fs from "fs";
 
 class Agent {
   DELETED_HASH = "deleted";
-  constructor({ chain, viemAccount, pimlicoAPIKey, storageProvider }) {
+  constructor({
+    chain,
+    viemAccount,
+    pimlicoAPIKey,
+    storageProvider,
+    dataAccessProvider,
+  }) {
     if (!chain) {
       throw new Error("Chain is required - options: gnosis, sepolia");
     }
@@ -37,6 +43,11 @@ class Agent {
     this.walletClient = clients.walletClient;
     this.portalRegistry = this.setPortalRegistry();
     this.owner = this.viemAccount.address;
+    this.dataAccessProvider = dataAccessProvider;
+
+    // This is needed to check if the async validation was done later.
+    // Because there can not be `await` in the constructor.
+    this._asyncConfigValidated = false;
   }
 
   async setupSafe() {
@@ -142,7 +153,7 @@ class Agent {
             verifiers.portalDecryptionKeyVerifier,
             verifiers.memberEncryptionKeyVerifer,
             verifiers.memberDecryptionKeyVerifer,
-          ],  
+          ],
         }]
       });
       const receipt = await this.smartAccountClient.waitForUserOperationReceipt({
@@ -167,10 +178,10 @@ class Agent {
         portalKeys,
         verifiers,
       };
-      
+
       // Set portal data
       this.portal = portalData;
-      
+
       fs.writeFileSync(
         `creds/${this.namespace}.json`,
         JSON.stringify(portalData, null, 2)
@@ -193,19 +204,96 @@ class Agent {
     if (!this.portal || !this.portal.portalAddress) {
       throw new Error("Portal not found!");
     }
+
+    if (!this._asyncConfigValidated && this.dataAccessProvider) {
+      // any async validation should be added here
+      await this.dataAccessProvider.validateConfig();
+
+      this._asyncConfigValidated = true;
+    }
   }
 
   async uploadToStorage(fileName, content) {
     return this.storageProvider.upload(fileName, content);
   }
 
-  async create(output) {
+  /**
+   * Create a new file (public or encrypted based on a composite or a simple accessCondition)
+   *
+   * @param {string|object} output - The file content (string for text, object for JSON)
+   * @param {object} options - Configuration options
+   * @param {object} [options.dataAccessConfig] - Data access configuration to be passed to the data access provider.
+   * @returns {Promise<object>} File creation result with fileId, hash, encrypted status
+   * @throws {Error} If validation fails
+   *
+   * @example
+   * // Create public file
+   * const result = await agent.create('Hello World');
+   *
+   * @example
+   * // Create encrypted file with time-based access condition (while using TACo as the data access provider)
+   * const result = await agent.create('Secret content', {
+   *   dataAccessConfig: {
+   *     accessCondition: {
+   *       type: 'time',
+   *       returnValueTest: {
+   *         comparator: '>=',
+   *         value: Math.floor(Date.now() / 1000) + 3600 // 1 hour from now
+   *       }
+   *     }
+   *   }
+   * });
+   */
+  async create(output, options = {}) {
     await this.prechecks();
-    const contentIpfsHash = await this.uploadToStorage('output.md', output);
 
+    let contentToUpload = output;
+    let filename = "output.md";
+    let isEncrypted = false;
+    let dataAccessMetadata = null;
+
+    // Handle encryption if accessCondition is provided
+    if (
+      options &&
+      options.dataAccessConfig &&
+      Object.keys(options.dataAccessConfig).length > 0
+    ) {
+      if (!this.dataAccessProvider) {
+        throw new Error(
+          `Data access provider is required for encrypted files. Please provide a dataAccessProvider in the Agent constructor.`
+        );
+      }
+
+      // Encrypt the content using the provider
+      const encryptedBytes = await this.dataAccessProvider.encrypt(
+        contentToUpload,
+        // Pass options directly - the data access provider handle its own options
+        options.dataAccessConfig,
+      );
+      contentToUpload = encryptedBytes;
+      filename = "encrypted_output.bin";
+      isEncrypted = true;
+
+      // Get metadata config from data access provider
+      if (this.dataAccessProvider) {
+        dataAccessMetadata = this.dataAccessProvider.getMetadataConfig();
+      }
+    }
+
+    // Upload content (either original or encrypted)
+    const contentIpfsHash = await this.uploadToStorage(
+      filename,
+      contentToUpload
+    );
+
+    // Create metadata
     const metadata = {
-      name: `${this.portal.portalAddress}/${this.namespace}/output.md`,
-      description: "Markdown file created by FileverseAgent",
+      name: `${this.portal.portalAddress}/${this.namespace}/${filename}`,
+      description: isEncrypted
+        ? "Encrypted Markdown file created by FileverseAgent"
+        : "Markdown file created by FileverseAgent",
+      encrypted: isEncrypted,
+      ...(dataAccessMetadata && { dataAccessConfig: dataAccessMetadata }),
     };
     const metadataIpfsHash = await this.uploadToStorage(
       'metadata.json',
@@ -245,11 +333,23 @@ class Agent {
       hash: hash,
       fileId,
       portalAddress: this.portal.portalAddress,
+      encrypted: isEncrypted,
     };
+
+    // Add the accessCondition to the return object if encrypted
+    if (isEncrypted) {
+      transaction.accessCondition = options.accessCondition;
+    }
+
     return transaction;
   }
 
-  async getFile(fileId) {
+  /**
+   * Get file info and metadata by File ID
+   * @param {string|number|bigint} fileId - The file ID to retrieve
+   * @returns {Promise<object>} File information object with metadata
+   */
+  async getFileInfo(fileId) {
     await this.prechecks();
     const file = await this.publicClient.readContract({
       address: this.portal.portalAddress,
@@ -258,27 +358,166 @@ class Agent {
       args: [fileId],
     });
     const [metadataIpfsHash, contentIpfsHash] = file;
+
+    // Get metadata to check if file is encrypted
+    let metadata = {};
+    try {
+      const metadataResult = await this.storageProvider.download(
+        metadataIpfsHash
+      );
+
+      let metadataContent = metadataResult;
+
+      // Simplified metadata handling: parse strings as JSON, use everything else as-is
+      if (typeof metadataContent === "string") {
+        try {
+          metadata = JSON.parse(metadataContent);
+        } catch (parseError) {
+          console.warn(
+            `Could not parse metadata as JSON for file ${fileId}:`,
+            parseError
+          );
+          metadata = {};
+        }
+      } else {
+        // For all other cases, use metadata as is
+        metadata = metadataContent || {};
+      }
+    } catch (error) {
+      console.warn(`Could not retrieve metadata for file ${fileId}:`, error);
+      metadata = {};
+    }
+
     return {
       portal: this.portal,
       namespace: this.namespace,
       metadataIpfsHash,
       contentIpfsHash,
+      metadata,
     };
   }
 
-  async update(fileId, output) {
+  /**
+   * Get file with its content
+   * @param {string|number|bigint} fileId - The file ID to retrieve
+   * @param {object} [options={}] - Configuration options
+   * @param {object} [options.dataAccessConfig] - Optional data access configuration for encrypted files
+   * @returns {Promise<object>} File information object with content
+   */
+  async getFile(fileId, options = {}) {
+    await this.prechecks();
+
+    // Get file info first
+    const fileInfo = await this.getFileInfo(fileId);
+
+    // Validate requirements for encrypted files
+    if (fileInfo.metadata.encrypted && !this.dataAccessProvider) {
+      throw new Error("Data access provider is required for encrypted files.");
+    }
+
+    try {
+      // Use data access provider for encrypted files
+      if (fileInfo.metadata.encrypted) {
+        // Download encrypted bytes and decrypt
+        const encryptedBytes = await this.storageProvider.download(
+          fileInfo.contentIpfsHash,
+          { binary: true }
+        );
+
+        const decryptedBytes = await this.dataAccessProvider.decrypt(
+          encryptedBytes,
+          // Pass dataAccessConfig options directly - each data access provider will handle its own options
+          options.dataAccessConfig
+        );
+
+        // Convert Uint8Array to string because the current implementation is specifically for .md MarkDown files which is text-based.
+        // If the agent was expanded to support more file types, this would need to be changed among other changes.
+        const decryptedContent = new TextDecoder().decode(decryptedBytes);
+
+        return {
+          ...fileInfo,
+          content: decryptedContent,
+          wasEncrypted: true,
+        };
+      }
+
+      // Download public file content
+      const content = await this.storageProvider.download(
+        fileInfo.contentIpfsHash
+      );
+
+      return {
+        ...fileInfo,
+        content,
+      };
+    } catch (error) {
+      throw new Error(
+        `Failed to download file content for fileId ${fileId}: ${error.message}`
+      );
+    }
+  }
+
+  /**
+   * Update an existing file with new content
+   * @param {string|number|bigint} fileId - The file ID to update
+   * @param {string|object} output - The new file content
+   * @param {object} options - Configuration options
+   * @param {object} [options.dataAccessConfig] - Data access configuration to be passed to the data access provider.
+   * @returns {Promise<object>} Transaction result
+   */
+  async update(fileId, output, options = {}) {
     await this.prechecks();
 
     // Read latest metadata and content IPFS hashes from portal before updating,
     // in order to unpin them after a successful update transaction
-    const fileBeforeUpdate = await this.getFile(fileId);
+    const fileBeforeUpdate = await this.getFileInfo(fileId);
 
-    const contentIpfsHash = await this.uploadToStorage("output.md", output);
+    let contentToUpload = output;
+    let filename = "output.md";
+    let isEncrypted = false;
+    let dataAccessMetadata = null;
+
+    // Handle encryption if accessCondition is provided
+    if (
+      options &&
+      options.dataAccessConfig &&
+      Object.keys(options.dataAccessConfig).length > 0
+    ) {
+      if (!this.dataAccessProvider) {
+        throw new Error(
+          `Data access provider is required for encrypted files. Please provide a dataAccessProvider in the Agent constructor.`
+        );
+      }
+
+      // Encrypt the content using the provider
+      const encryptedBytes = await this.dataAccessProvider.encrypt(
+        contentToUpload,
+        // Pass options directly - the data access provider handle its own options
+        options.dataAccessConfig
+      );
+      contentToUpload = encryptedBytes;
+      filename = "encrypted_output.bin";
+      isEncrypted = true;
+
+      // Get metadata config from data access provider
+      if (this.dataAccessProvider) {
+        dataAccessMetadata = this.dataAccessProvider.getMetadataConfig();
+      }
+    }
+
+    const contentIpfsHash = await this.uploadToStorage(
+      filename,
+      contentToUpload
+    );
 
     const metadata = {
       name: `${this.portal.portalAddress}/${this.namespace}/${filename}`,
-      description: "Updated Markdown file by FileverseAgent",
+      description: isEncrypted
+        ? "Updated encrypted file by FileverseAgent"
+        : "Updated Markdown file by FileverseAgent",
       contentIpfsHash,
+      encrypted: isEncrypted,
+      ...(dataAccessMetadata && { dataAccessConfig: dataAccessMetadata }),
     };
     const metadataIpfsHash = await this.uploadToStorage("metadata.json", metadata);
 
@@ -325,7 +564,7 @@ class Agent {
 
       // Read metadata and content IPFS hashes from portal before deleting,
       // in order to unpin them after a successful deletion transaction
-      const fileBeforeDelete = await this.getFile(fileId);
+      const fileBeforeDelete = await this.getFileInfo(fileId);
 
       const hash = await this.smartAccountClient.sendUserOperation({
         calls: [{
