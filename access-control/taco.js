@@ -1,15 +1,23 @@
-import { AccessClient } from "@nucypher/taco";
-import { DataAccessProvider } from "./base.js";
+import { ThresholdMessageKit } from "@nucypher/nucypher-core";
+import { AccessClient, conditions } from "@nucypher/taco";
+import { AccessControlProvider } from "./base.js";
 
 export const TACO_PROVIDER_TYPE = "TacoAccessProvider";
 /**
- * TACo-based data access provider
+ * @typedef {import('@nucypher/taco').conditions.context.CustomContextParam} CustomContextParam
+ * @typedef {Record<string, CustomContextParam>} CustomContextParameters
+ * @typedef {import('@nucypher/taco-auth').AuthProvider} AuthProvider
+ * @typedef {{contextParam: string, provider: AuthProvider}} ContextParamAndAuthProvider
+ */
+
+/**
+ * TACo-based access control provider
  * Provides encryption and decryption capabilities using TACo AccessClient
  *
  * @class TacoAccessProvider
- * @extends DataAccessProvider
+ * @extends AccessControlProvider
  */
-export class TacoAccessProvider extends DataAccessProvider {
+export class TacoAccessProvider extends AccessControlProvider {
   /**
    * Create a new TacoAccessProvider instance
    * @param {object} config - TACo configuration
@@ -36,14 +44,6 @@ export class TacoAccessProvider extends DataAccessProvider {
   }
 
   /**
-   * Check if the provider supports encryption
-   * @returns {boolean} True (TACo always supports encryption)
-   */
-  supportsEncryption() {
-    return true;
-  }
-
-  /**
    * Get provider type identifier
    * @returns {string} Provider type
    */
@@ -67,7 +67,7 @@ export class TacoAccessProvider extends DataAccessProvider {
    * @param {object} options - Encryption options
    * @param {object} options.accessCondition - TACo access condition object
    * @param {object} options.authSigner - Authentication signer (viem account or ethers signer)
-   * @returns {Promise<Uint8Array>} Encrypted data as bytes
+   * @returns {Promise<{encryptedBytes: Uint8Array, accessControlMetadata: object}>} Encrypted data and metadata
    * @throws {Error} If encryption fails
    */
   async encrypt(content, options) {
@@ -95,22 +95,65 @@ export class TacoAccessProvider extends DataAccessProvider {
       `✅ Content encrypted successfully (${encryptedBytes.length} bytes)`
     );
 
-    return encryptedBytes;
+    // Get metadata config
+    const config = this.accessClient.getConfig();
+    const accessControlMetadata = {
+      providerType: this.getProviderType(),
+      domain: config.domain,
+      ritualId: config.ritualId,
+    };
+
+
+    const conditionContext = new conditions.context.ConditionContext(
+      accessCondition
+    );
+
+    accessControlMetadata.requestedContextParameters = Array.from(
+      conditionContext.requestedContextParameters
+    );
+
+    return {
+      encryptedBytes,
+      accessControlMetadata,
+    };
   }
 
   /**
    * Decrypt encrypted content
    * @param {Uint8Array} encryptedBytes - Encrypted data
    * @param {object} [options] - Decryption options
-   * @param {object} [options.conditionContext] - TACo-specific condition context for decryption
+   *
+   * Auto-create TACo Condition Context and add customContextParameters and authProviders to it
+   * @param {ContextParamAndAuthProvider[]} [options.contextParamsAndAuthProviders] - Context parameter and Auth provider pairs to add to auto-created Condition Context
+   * @param {CustomContextParameters} [options.customContextParameters] - Custom context parameters to add to auto-created Condition Context
+   *
    * @returns {Promise<Uint8Array>} Decrypted data as bytes
-   * @throws {Error} If decryption fails
    */
   async decrypt(encryptedBytes, options = {}) {
     console.debug("🔓 Decrypting content with TacoAccessProvider");
 
-    // Extract TACo-specific options (conditionContext is optional for decrypt)
-    const { conditionContext } = options;
+    // Extract TACo-specific options
+    const { customContextParameters, contextParamsAndAuthProviders } = options;
+
+    // Auto-create Condition Context from messageKit
+    const messageKit = ThresholdMessageKit.fromBytes(encryptedBytes);
+    const conditionContext =
+      conditions.context.ConditionContext.fromMessageKit(messageKit);
+
+    // Apply custom parameters if provided
+    if (customContextParameters) {
+      conditionContext.addCustomContextParameterValues(customContextParameters);
+    }
+
+    // Add context parameters and their auth providers if provided
+    if (contextParamsAndAuthProviders) {
+      contextParamsAndAuthProviders.forEach((contextParamAndAuthProvider) => {
+        conditionContext.addAuthProvider(
+          contextParamAndAuthProvider.contextParam,
+          contextParamAndAuthProvider.provider
+        );
+      });
+    }
 
     const decryptedBytes = await this.accessClient.decrypt(
       encryptedBytes,
@@ -122,19 +165,5 @@ export class TacoAccessProvider extends DataAccessProvider {
     );
 
     return decryptedBytes;
-  }
-
-  /**
-   * Get configuration data suitable for metadata storage
-   * Returns only the essential TACo configuration that needs to be persisted
-   * @returns {object} Serializable configuration data for metadata
-   */
-  getMetadataConfig() {
-    const config = this.accessClient.getConfig();
-    return {
-      providerType: this.getProviderType(),
-      domain: config.domain,
-      ritualId: config.ritualId,
-    };
   }
 }

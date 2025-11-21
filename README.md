@@ -27,118 +27,45 @@ npm install @fileverse/agents
 ## Usage
 
 ```javascript
-import { Agent, TacoAccessProvider } from '@fileverse/agents';
-import { conditions } from '@nucypher/taco';
+import { Agent } from '@fileverse/agents';
 import { privateKeyToAccount } from 'viem/accounts';
-import { createPublicClient, http } from 'viem';
-import { polygonAmoy } from 'viem/chains';
 import { PinataStorageProvider } from '@fileverse/agents/storage';
 
 // Create storage provider
 const storageProvider = new PinataStorageProvider({
   jwt: process.env.PINATA_JWT,
-  gateway: process.env.PINATA_GATEWAY,
+  gateway: process.env.PINATA_GATEWAY
 });
 
-// Optional: Create a custom viem client for TACo operations
-// This connects to Polygon Amoy where TACo operations occur
-// (If not provided, Agent will use its default client)
-const tacoViemClient = createPublicClient({
-  chain: polygonAmoy,
-  transport: http(),
-});
-
-// Initialize agent (with optional TACo encryption)
+// Initialize agent
 const agent = new Agent({
   chain: process.env.CHAIN, // required - options: gnosis, sepolia
   viemAccount: privateKeyToAccount(process.env.PRIVATE_KEY), // required - viem account instance
   pimlicoAPIKey: process.env.PIMLICO_API_KEY, // required - see how to get API keys below
-  storageProvider, // required - storage provider instance
-  dataAccessProvider: new TacoAccessProvider({
-    // optional - for encrypted files with programmable access conditions
-    domain: process.env.TACO_DOMAIN, // required - options: 'lynx', 'tapir', 'mainnet'
-    ritualId: parseInt(process.env.TACO_RITUAL_ID), // required - TACo ritual ID (e.g., 6 for tapir, 27 for lynx)
-    viemClient: tacoViemClient, // optional - custom viem client for TACo operations (uses agent's client by default)
-  }),
+  storageProvider // required - storage provider instance
 });
 
 // setup storage with namespace
-// This will generate the required keys and deploy a portal or pull the existing
+// This will generate the required keys and deploy a portal or pull the existing 
 await agent.setupStorage('my-namespace'); // file is generated as the creds/${namespace}.json in the main directory
 
 const latestBlockNumber = await agent.getBlockNumber();
 console.log(`Latest block number: ${latestBlockNumber}`);
 
+// Note: Files created with this basic setup are stored without encryption.
+// To add encryption and access control, see the "Access Control Providers" section.
+
 // create a new file
 const file = await agent.create('Hello World');
 console.log(`File created: ${file}`);
 
-// create an encrypted file with access conditions (requires TaCo config already passed at the Agent constructor)
-// Note: You must pass authSigner in options for TACo encryption
+// get the file
+const fileData = await agent.getFile(file.fileId);
+console.log(`File: ${fileData}`);
 
-// Create a TACo access condition using the TACo SDK
-const timeCondition = new conditions.base.time.TimeCondition({
-  chain: 11155111, // Sepolia
-  method: 'blocktime',
-  returnValueTest: {
-    comparator: '>=',
-    value: Math.floor(Date.now() / 1000) + 3600, // Accessible 1 hour from now
-  },
-});
-
-const encryptedFile = await agent.create(
-  'This is a secret message',
-  {
-    dataAccessConfig: {
-      accessCondition: timeCondition, // Actual TACo condition object
-      authSigner: agent.viemAccount  // Pass authSigner for TACo encryption
-    }
-  }
-);
-console.log(`Encrypted file created: ${encryptedFile}`);
-
-// Get file metadata only (no content download)
-const fileInfo = await agent.getFileInfo(encryptedFile.fileId);
-console.log(`File metadata:`, fileInfo);
-console.log(`Is encrypted: ${fileInfo.metadata.encrypted}`);
-
-// Get file with content (automatically downloads and decrypts if needed)
-const fileWithContent = await agent.getFile(encryptedFile.fileId, {
-  dataAccessConfig: {
-    // Optional: Your decryption configuration here
-    // If not provided, the data access provider will use default behavior
-  }
-});
-console.log(`Decrypted content: ${fileWithContent.content}`); // Output: "This is a secret message"
-
-// update the file and pass the dataAccessConfig to the used access provider - Which is TACo in this example.
-// Note: if no encryption dataAccessConfig was provided the new content will be public
-const updatedFile = await agent.update(file.fileId, 'Hello World 2', {
-  dataAccessConfig: {
-    accessCondition,
-    authSigner: agent.viemAccount  // Required for TACo encryption
-  }
-});
+// update the file
+const updatedFile = await agent.update(file.fileId, 'Hello World 2');
 console.log(`File updated: ${updatedFile}`);
-
-// update with encryption - create a new condition for the update
-const balanceCondition = new conditions.base.rpc.RpcCondition({
-  chain: 11155111, // Sepolia
-  method: 'eth_getBalance',
-  parameters: [':userAddress', 'latest'],
-  returnValueTest: {
-    comparator: '>=',
-    value: 0, // User must have any balance
-  },
-});
-
-const encryptedUpdate = await agent.update(file.fileId, 'Updated encrypted content', {
-  dataAccessConfig: {
-    accessCondition: balanceCondition,
-    authSigner: agent.viemAccount
-  }
-});
-console.log(`File updated with encryption: ${encryptedUpdate}`);
 
 // delete the file
 const deletedFile = await agent.delete(file.fileId);
@@ -177,34 +104,140 @@ const storageProvider = new SwarmStorageProvider({
 });
 ```
 
-## DataAccessProvider
+## Access Control Providers
 
-DataAccessProviders enable encrypted file storage with programmable access conditions. The Agent supports different types of data access providers:
+Access Control Providers add an additional layer of control over who can access your agent's files beyond basic storage permissions.
 
 ### TACo (Threshold Access Control)
 
-When TACo DataAccessProvider is configured, you can create encrypted files with programmable access conditions:
+TACo enables encryption with programmable access control. Files are encrypted client-side and can only be decrypted by users or agents that meet the encryptor's specified conditions. Learn more at [taco.build](https://taco.build/) or in the [TACo documentation](https://docs.taco.build/).
 
-- **Time-based conditions**: files accessible after a specific time
-- **Token balance conditions**: files accessible to users with minimum token balances
-- **NFT ownership conditions**: files accessible to holders of specific NFTs
-- **Custom RPC conditions**: files with complex blockchain-based access logic
-- **Compound conditions**: combine multiple conditions with AND/OR logic
-- **And more** as documented at https://docs.taco.build/for-developers/references/conditions
+#### Supported Access Conditions
 
-#### TACo Configuration Options
+- **Time-based**: Grant access after a specific timestamp
+- **Token balance**: Require minimum token holdings (ERC-20)
+- **NFT ownership**: Restrict to holders of specific NFTs (ERC-721)
+- **Custom RPC conditions**: Implement complex blockchain-based logic
+- **Compound conditions**: Combine multiple conditions with AND/OR operators
+- **And more**: See the [TACo Conditions documentation](https://docs.taco.build/for-developers/references/conditions) for the complete list
 
-Supported TACo domains and their characteristics:
+#### Usage Example
 
-- **DEVNET** (`lynx`): Bleeding-edge developer network (Chain: Polygon Amoy 80002)
-- **TESTNET** (`tapir`): Stable testnet for current TACo release (Chain: Polygon Amoy 80002)
-- **MAINNET** (`mainnet`): Production network (Chain: Polygon Mainnet 137)
+```javascript
+import { Agent, TacoAccessProvider } from '@fileverse/agents';
+import { conditions } from '@nucypher/taco';
+import { privateKeyToAccount } from 'viem/accounts';
+import { createPublicClient, http } from 'viem';
+import { polygonAmoy } from 'viem/chains';
+import { PinataStorageProvider } from '@fileverse/agents/storage';
 
-For current ritual IDs and detailed domain information, see: https://docs.taco.build/for-developers/get-started-with-tac
+// Create storage provider
+const storageProvider = new PinataStorageProvider({
+  pinataJWT: process.env.PINATA_JWT,
+  pinataGateway: process.env.PINATA_GATEWAY,
+});
 
-**Important**: TACo operations occur on Polygon networks, so your TACo viem client must connect to the corresponding Polygon chain (Amoy for testnet, Mainnet for production). However, access conditions can be evaluated on any supported blockchain (Sepolia, Ethereum Mainnet, etc.).
+// Create viem client for TACo (connects to Polygon)
+// This connects to Polygon Amoy where TACo internal operations occur for taco TESTNET (`tapir` domain)
+const tacoViemClient = createPublicClient({
+  chain: polygonAmoy,
+  transport: http(),
+});
 
-**Working Example**: See the [Agent with TACo example](./examples/agent-taco-example.js) for a complete working implementation that demonstrates encryption, decryption, and access control.
+const viemAccount = privateKeyToAccount(process.env.PRIVATE_KEY);
+
+// Initialize agent with TACo access control
+const agent = new Agent({
+  chain: process.env.CHAIN, // required - options: gnosis, sepolia
+  viemAccount: privateKeyToAccount(process.env.PRIVATE_KEY), // required - viem account instance
+  pimlicoAPIKey: process.env.PIMLICO_API_KEY, // required - see how to get API keys below
+  storageProvider // required - storage provider instance
+  accessControlProvider: new TacoAccessProvider(
+    domain: process.env.TACO_DOMAIN, // for testnet: DOMAIN_NAMES.TESTNET ('tapir' domain)
+    ritualId: parseInt(process.env.TACO_RITUAL_ID), // TACo ritual ID (e.g., 6 for tapir)
+    viemClient: tacoViemClient, // Polygon Amoy client for TACo internal operations on testnet
+  });
+
+// setup storage with namespace
+// This will generate the required keys and deploy a portal or pull the existing
+await agent.setupStorage('my-namespace'); // file is generated as the creds/${namespace}.json in the main directory
+
+
+// Create a TACo access condition using the TACo SDK
+const timeCondition = new conditions.base.time.TimeCondition({
+  chain: 11155111, // Sepolia
+  returnValueTest: {
+    comparator: '>=',
+    value: Math.floor(Date.now() / 1000) + 3600, // Accessible 1 hour from now
+  },
+});
+
+// Create an encrypted file with access conditions (requires the TACo config to have been passed to the Agent constructor)
+const encryptedFile = await agent.create(
+  'This is a secret message',
+  {
+    accessControlConfig: {
+      accessCondition: timeCondition, // Actual TACo condition object
+      authSigner: agent.viemAccount  // Pass authSigner for TACo encryption authentication
+    }
+  }
+);
+console.log(`Encrypted file created: ${encryptedFile}`);
+
+// Get file info & metadata
+const fileInfo = await agent.getFileInfo(encryptedFile.fileId);
+console.log(`File metadata:`, fileInfo);
+console.log(`Is encrypted: ${fileInfo.metadata.encrypted}`);
+
+// Get file with content (automatically downloads and decrypts if the access control conditions was satisfied)
+const fileWithContent = await agent.getFile(encryptedFile.fileId, {
+  accessControlConfig: {
+  // Optional: { accessControlConfig: { ... } } - required for some access conditions
+  }
+});
+console.log(`Decrypted content: ${fileWithContent.content}`); // Output: "This is a secret message"
+
+// update the file and pass the accessControlConfig to the used access provider - Which is TACo in this example.
+// Note: if no encryption accessControlConfig was provided the new content will be public
+const updatedFile = await agent.update(file.fileId, 'Hello World 2', {
+  accessControlConfig: {
+    accessCondition,
+    authSigner: agent.viemAccount  // Required for TACo encryption authentication
+  }
+});
+console.log(`File updated: ${updatedFile}`);
+
+// update with encryption - create a new condition for the update
+const balanceCondition = new conditions.base.rpc.RpcCondition({
+  chain: 11155111, // Sepolia
+  method: 'eth_getBalance',
+  parameters: [':userAddress', 'latest'],
+  returnValueTest: {
+    comparator: '>',
+    value: 0, // User must have any balance
+  },
+});
+
+const encryptedUpdate = await agent.update(file.fileId, 'Updated encrypted content', {
+  accessControlConfig: {
+    accessCondition: balanceCondition,
+    authSigner: agent.viemAccount
+  }
+});
+console.log(`File updated with encryption: ${encryptedUpdate}`);
+
+// delete the file
+const deletedFile = await agent.delete(file.fileId);
+console.log(`File deleted: ${deletedFile}`);
+```
+
+#### Configuration & Setup
+
+**Networks**: TACo operations run on Polygon networks (Amoy for testnet, Mainnet for production), but access conditions can be evaluated on any supported blockchain (Ethereum, Sepolia, etc.).
+
+**Getting Started**: See the [TACo documentation](https://docs.taco.build/for-developers/get-started-with-tac) for supported domains, ritual IDs, and network details.
+
+**Complete Example**: Check out the [Agent with TACo example](./examples/agent-taco-example.js) for a full implementation with multiple access condition types.
 
 ## Run Tests
 
@@ -212,7 +245,10 @@ To run the tests, you need to have something like the following environment vari
 Create a `.env` file in the root directory of the project.
 
 ```bash
-# Keys
+# Agent
+AGENT_CHAIN=sepolia
+
+# Key that its address has funds on the AGENT_CHAIN
 PRIVATE_KEY=[FILL_YOUR_PRIVATE_KEY_HERE]
 
 # Pinata
@@ -222,12 +258,11 @@ PINATA_GATEWAY=[FILL_YOUR_PINATA_GATEWAY_HERE]
 PIMLICO_API_KEY=[FILL_YOUR_PIMLICO_API_KEY_HERE]
 
 # TACo
-TACO_DOMAIN=tapir
+TACO_DOMAIN=tapir # DOMAIN_NAMES.TESTNET
 TACO_RITUAL_ID=6
-TACO_CHAIN_ID=11155111
+TACO_CHAIN_ID=80002 # Polygon Amoy
+TACO_CHAIN_RPC_URL=https://rpc-amoy.polygon.technology # Rpc endpoint for the chosen TACO_CHAIN_ID
 
-# Agent
-AGENT_CHAIN=sepolia
 
 ```
 

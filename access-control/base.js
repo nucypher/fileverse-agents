@@ -1,11 +1,11 @@
 /**
- * Abstract base class for data access providers
+ * Abstract base class for access control providers
  * Defines the contract for encryption, decryption, and access control operations
  *
  * @abstract
- * @class DataAccessProvider
+ * @class AccessControlProvider
  */
-export class DataAccessProvider {
+export class AccessControlProvider {
   /**
    * Get provider configuration information
    * @abstract
@@ -16,21 +16,12 @@ export class DataAccessProvider {
   }
 
   /**
-   * Check if the provider supports encryption
-   * @abstract
-   * @returns {boolean} True if encryption is supported
-   */
-  supportsEncryption() {
-    throw new Error("supportsEncryption() must be implemented by subclass");
-  }
-
-  /**
    * Encrypt content with provider-specific options
    * @abstract
    * @param {string|object} content - Content to encrypt
    * @param {object} options - Provider-specific encryption options
    *                          Example: TACo requires { accessCondition, authSigner }
-   * @returns {Promise<Uint8Array>} Encrypted data as bytes
+   * @returns {Promise<{encryptedBytes: Uint8Array, accessControlMetadata: object}>} Encrypted data and metadata
    * @throws {Error} If encryption fails or is not supported
    */
   async encrypt(content, options) {
@@ -67,14 +58,5 @@ export class DataAccessProvider {
   async validateConfig() {
     throw new Error("validateConfig() must be implemented by subclass");
   }
-
-  /**
-   * Get configuration data suitable for metadata storage
-   * This should return only the essential configuration that needs to be persisted
-   * @abstract
-   * @returns {object} Serializable configuration data for metadata
-   */
-  getMetadataConfig() {
-    throw new Error("getMetadataConfig() must be implemented by subclass");
-  }
 }
+

@@ -38,7 +38,7 @@ class BaseStorageProvider {
       data = await data.arrayBuffer();
     }
 
-    // Normalize to Uint8Array for consumers (TACo expects raw bytes)
+    // Normalize to Uint8Array for consumers (allow raw bytes)
     if (data instanceof ArrayBuffer) {
       return new Uint8Array(data);
     }
@@ -50,7 +50,7 @@ class BaseStorageProvider {
 
     // Last-resort fallback for unexpected shapes
     return new TextEncoder().encode(
-      typeof data === 'object' ? JSON.stringify(data) : String(data)
+      typeof data === "object" ? JSON.stringify(data) : String(data)
     );
   }
 }

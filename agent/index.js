@@ -20,7 +20,7 @@ class Agent {
     viemAccount,
     pimlicoAPIKey,
     storageProvider,
-    dataAccessProvider,
+    accessControlProvider,
   }) {
     if (!chain) {
       throw new Error("Chain is required - options: gnosis, sepolia");
@@ -43,7 +43,7 @@ class Agent {
     this.walletClient = clients.walletClient;
     this.portalRegistry = this.setPortalRegistry();
     this.owner = this.viemAccount.address;
-    this.dataAccessProvider = dataAccessProvider;
+    this.accessControlProvider = accessControlProvider;
 
     // This is needed to check if the async validation was done later.
     // Because there can not be `await` in the constructor.
@@ -205,9 +205,9 @@ class Agent {
       throw new Error("Portal not found!");
     }
 
-    if (!this._asyncConfigValidated && this.dataAccessProvider) {
+    if (!this._asyncConfigValidated && this.accessControlProvider) {
       // any async validation should be added here
-      await this.dataAccessProvider.validateConfig();
+      await this.accessControlProvider.validateConfig();
 
       this._asyncConfigValidated = true;
     }
@@ -222,7 +222,7 @@ class Agent {
    *
    * @param {string|object} output - The file content (string for text, object for JSON)
    * @param {object} options - Configuration options
-   * @param {object} [options.dataAccessConfig] - Data access configuration to be passed to the data access provider.
+   * @param {object} [options.accessControlConfig] - Access control configuration to be passed to the access control provider.
    * @returns {Promise<object>} File creation result with fileId, hash, encrypted status
    * @throws {Error} If validation fails
    *
@@ -231,53 +231,54 @@ class Agent {
    * const result = await agent.create('Hello World');
    *
    * @example
-   * // Create encrypted file with time-based access condition (while using TACo as the data access provider)
+   * // Create encrypted file with time-based access condition (while using TACo as the access control provider)
    * const result = await agent.create('Secret content', {
-   *   dataAccessConfig: {
+   *   accessControlConfig: {
    *     accessCondition: {
    *       type: 'time',
    *       returnValueTest: {
    *         comparator: '>=',
    *         value: Math.floor(Date.now() / 1000) + 3600 // 1 hour from now
-   *       }
-   *     }
+   *       },
+   *     },
    *   }
    * });
    */
   async create(output, options = {}) {
     await this.prechecks();
 
-    let contentToUpload = output;
-    let filename = "output.md";
+    let contentToUpload;
+    let filename;
     let isEncrypted = false;
-    let dataAccessMetadata = null;
+    let accessControlMetadata = null;
 
-    // Handle encryption if accessCondition is provided
+    // Handle if accessControlConfig is provided
     if (
       options &&
-      options.dataAccessConfig &&
-      Object.keys(options.dataAccessConfig).length > 0
+      options.accessControlConfig &&
+      Object.keys(options.accessControlConfig).length > 0
     ) {
-      if (!this.dataAccessProvider) {
+      if (!this.accessControlProvider) {
         throw new Error(
-          `Data access provider is required for encrypted files. Please provide a dataAccessProvider in the Agent constructor.`
+          `Access control provider is required for encrypted files. Please provide an accessControlProvider in the Agent constructor.`
         );
       }
 
       // Encrypt the content using the provider
-      const encryptedBytes = await this.dataAccessProvider.encrypt(
-        contentToUpload,
-        // Pass options directly - the data access provider handle its own options
-        options.dataAccessConfig,
+      const encryptResult = await this.accessControlProvider.encrypt(
+        output,
+        // Pass options directly - the access control provider handle its own options
+        options.accessControlConfig
       );
-      contentToUpload = encryptedBytes;
+      contentToUpload = encryptResult.encryptedBytes;
+      accessControlMetadata = encryptResult.accessControlMetadata;
+
       filename = "encrypted_output.bin";
       isEncrypted = true;
-
-      // Get metadata config from data access provider
-      if (this.dataAccessProvider) {
-        dataAccessMetadata = this.dataAccessProvider.getMetadataConfig();
-      }
+    } else {
+      // No access control configuration provided
+      contentToUpload = output;
+      filename = "output.md";
     }
 
     // Upload content (either original or encrypted)
@@ -293,7 +294,9 @@ class Agent {
         ? "Encrypted Markdown file created by FileverseAgent"
         : "Markdown file created by FileverseAgent",
       encrypted: isEncrypted,
-      ...(dataAccessMetadata && { dataAccessConfig: dataAccessMetadata }),
+      ...(accessControlMetadata && {
+        accessControlConfig: accessControlMetadata,
+      }),
     };
     const metadataIpfsHash = await this.uploadToStorage(
       'metadata.json',
@@ -359,33 +362,33 @@ class Agent {
     });
     const [metadataIpfsHash, contentIpfsHash] = file;
 
-    // Get metadata to check if file is encrypted
-    let metadata = {};
+    let metadataContent;
     try {
-      const metadataResult = await this.storageProvider.download(
-        metadataIpfsHash
-      );
-
-      let metadataContent = metadataResult;
-
-      // Simplified metadata handling: parse strings as JSON, use everything else as-is
-      if (typeof metadataContent === "string") {
-        try {
-          metadata = JSON.parse(metadataContent);
-        } catch (parseError) {
-          console.warn(
-            `Could not parse metadata as JSON for file ${fileId}:`,
-            parseError
-          );
-          metadata = {};
-        }
-      } else {
-        // For all other cases, use metadata as is
-        metadata = metadataContent || {};
-      }
+      metadataContent = await this.storageProvider.download(metadataIpfsHash);
     } catch (error) {
-      console.warn(`Could not retrieve metadata for file ${fileId}:`, error);
-      metadata = {};
+      throw new Error(`Could not retrieve metadata for file ${fileId}:`, {
+        cause: error,
+      });
+    }
+
+    // Parse metadata: handle both string JSON and already-parsed objects
+    let metadata;
+    if (typeof metadataContent === "string") {
+      try {
+        metadata = JSON.parse(metadataContent);
+      } catch (parseError) {
+        throw new Error(
+          `Could not parse metadata as JSON for file ${fileId}:`,
+          { cause: parseError }
+        );
+      }
+    } else if (metadataContent != null && typeof metadataContent === "object") {
+      // Metadata was stored as JSON string but storage provider auto-parsed it (e.g., Pinata SDK)
+      metadata = metadataContent;
+    } else {
+      throw new Error(
+        `Unexpected metadata type for file ${fileId}: ${typeof metadataContent}`
+      );
     }
 
     return {
@@ -399,24 +402,34 @@ class Agent {
 
   /**
    * Get file with its content
-   * @param {string|number|bigint} fileId - The file ID to retrieve
+   * @param {string|number|bigint|object} fileIdOrInfo - The file ID to retrieve or the file info object
    * @param {object} [options={}] - Configuration options
-   * @param {object} [options.dataAccessConfig] - Optional data access configuration for encrypted files
+   * @param {object} [options.accessControlConfig] - Optional access control configuration for encrypted files
    * @returns {Promise<object>} File information object with content
    */
-  async getFile(fileId, options = {}) {
+  async getFile(fileIdOrInfo, options = {}) {
     await this.prechecks();
 
-    // Get file info first
-    const fileInfo = await this.getFileInfo(fileId);
+    let fileInfo;
+    if (
+      typeof fileIdOrInfo === "string" ||
+      typeof fileIdOrInfo === "number" ||
+      typeof fileIdOrInfo === "bigint"
+    ) {
+      fileInfo = await this.getFileInfo(fileIdOrInfo);
+    } else {
+      fileInfo = fileIdOrInfo;
+    }
 
     // Validate requirements for encrypted files
-    if (fileInfo.metadata.encrypted && !this.dataAccessProvider) {
-      throw new Error("Data access provider is required for encrypted files.");
+    if (fileInfo.metadata.encrypted && !this.accessControlProvider) {
+      throw new Error(
+        "Access control provider is required for encrypted files."
+      );
     }
 
     try {
-      // Use data access provider for encrypted files
+      // Use access control provider for encrypted files
       if (fileInfo.metadata.encrypted) {
         // Download encrypted bytes and decrypt
         const encryptedBytes = await this.storageProvider.download(
@@ -424,10 +437,10 @@ class Agent {
           { binary: true }
         );
 
-        const decryptedBytes = await this.dataAccessProvider.decrypt(
+        const decryptedBytes = await this.accessControlProvider.decrypt(
           encryptedBytes,
-          // Pass dataAccessConfig options directly - each data access provider will handle its own options
-          options.dataAccessConfig
+          // Pass accessControlConfig options directly - each access control provider will handle its own options
+          options.accessControlConfig
         );
 
         // Convert Uint8Array to string because the current implementation is specifically for .md MarkDown files which is text-based.
@@ -452,7 +465,9 @@ class Agent {
       };
     } catch (error) {
       throw new Error(
-        `Failed to download file content for fileId ${fileId}: ${error.message}`
+        `Failed to download file content for fileId ${
+          fileInfo.fileId ?? "unknown"
+        }: ${error.message || error}`
       );
     }
   }
@@ -462,7 +477,7 @@ class Agent {
    * @param {string|number|bigint} fileId - The file ID to update
    * @param {string|object} output - The new file content
    * @param {object} options - Configuration options
-   * @param {object} [options.dataAccessConfig] - Data access configuration to be passed to the data access provider.
+   * @param {object} [options.accessControlConfig] - Access control configuration to be passed to the access control provider.
    * @returns {Promise<object>} Transaction result
    */
   async update(fileId, output, options = {}) {
@@ -475,34 +490,30 @@ class Agent {
     let contentToUpload = output;
     let filename = "output.md";
     let isEncrypted = false;
-    let dataAccessMetadata = null;
+    let accessControlMetadata = null;
 
     // Handle encryption if accessCondition is provided
     if (
       options &&
-      options.dataAccessConfig &&
-      Object.keys(options.dataAccessConfig).length > 0
+      options.accessControlConfig &&
+      Object.keys(options.accessControlConfig).length > 0
     ) {
-      if (!this.dataAccessProvider) {
+      if (!this.accessControlProvider) {
         throw new Error(
-          `Data access provider is required for encrypted files. Please provide a dataAccessProvider in the Agent constructor.`
+          `Access control provider is required for encrypted files. Please provide an accessControlProvider in the Agent constructor.`
         );
       }
 
       // Encrypt the content using the provider
-      const encryptedBytes = await this.dataAccessProvider.encrypt(
+      const encryptResult = await this.accessControlProvider.encrypt(
         contentToUpload,
-        // Pass options directly - the data access provider handle its own options
-        options.dataAccessConfig
+        // Pass options directly - the access control provider handle its own options
+        options.accessControlConfig
       );
-      contentToUpload = encryptedBytes;
+      contentToUpload = encryptResult.encryptedBytes;
+      accessControlMetadata = encryptResult.accessControlMetadata;
       filename = "encrypted_output.bin";
       isEncrypted = true;
-
-      // Get metadata config from data access provider
-      if (this.dataAccessProvider) {
-        dataAccessMetadata = this.dataAccessProvider.getMetadataConfig();
-      }
     }
 
     const contentIpfsHash = await this.uploadToStorage(
@@ -517,9 +528,14 @@ class Agent {
         : "Updated Markdown file by FileverseAgent",
       contentIpfsHash,
       encrypted: isEncrypted,
-      ...(dataAccessMetadata && { dataAccessConfig: dataAccessMetadata }),
+      ...(accessControlMetadata && {
+        accessControlConfig: accessControlMetadata,
+      }),
     };
-    const metadataIpfsHash = await this.uploadToStorage("metadata.json", metadata);
+    const metadataIpfsHash = await this.uploadToStorage(
+      "metadata.json",
+      metadata
+    );
 
     const hash = await this.smartAccountClient.sendUserOperation({
       calls: [{

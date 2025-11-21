@@ -1,26 +1,39 @@
-import { describe, it, before } from 'mocha';
-import { expect } from 'chai';
+import { describe, it, before } from "mocha";
+import { expect } from "chai";
 import { Agent, TacoAccessProvider } from "../index.js";
-import { conditions, ThresholdMessageKit } from "@nucypher/taco";
+import { conditions } from "@nucypher/taco";
 import { EIP4361AuthProvider } from "@nucypher/taco-auth";
 
 import { PinataStorageProvider } from "../storage/pinata.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { createPublicClient, http } from "viem";
-import { polygonAmoy } from "viem/chains";
 import dotenv from "dotenv";
+import { DOMAIN_NAMES } from "@nucypher/shared";
 
-const TACO_DOMAIN = process.env.TACO_DOMAIN || "tapir";
+const TACO_DOMAIN = process.env.TACO_DOMAIN || DOMAIN_NAMES.TESTNET; // TACo testnet domain: tapir
 const TACO_RITUAL_ID = parseInt(process.env.TACO_RITUAL_ID || 6);
-
-// TACo testing with domain tapir on Polygon Amoy (chain ID 80002)
-const TACO_CHAIN_ID = parseInt(process.env.TACO_CHAIN_ID || 80002);
+const TACO_CHAIN_ID = parseInt(process.env.TACO_CHAIN_ID || 80002); // Polygon Amoy chain ID: 80002
+const TACO_CHAIN_RPC_URL =
+  process.env.TACO_CHAIN_RPC_URL || "https://rpc-amoy.polygon.technology";
 
 const AGENT_CHAIN = process.env.AGENT_CHAIN || "sepolia";
 
+const SEPOLIA_CHAIN_ID = 11155111; // sepolia chain ID - used for access conditions
+
 dotenv.config();
 
-describe("Agent with TACo DataAccessProvider: configuration, encrypted file lifecycle, and error handling", function () {
+// A TACo RPC condition that allows access to any address (balance >= 0)
+const permissiveAccessCondition = new conditions.base.rpc.RpcCondition({
+  chain: SEPOLIA_CHAIN_ID,
+  method: "eth_getBalance",
+  parameters: [":userAddress"],
+  returnValueTest: {
+    comparator: ">=",
+    value: 0, // Any balance
+  },
+});
+
+describe("Agent with TACo AccessControlProvider: configuration, encrypted file lifecycle, and error handling", function () {
   this.timeout(180000); // Increase timeout for TACo operations
 
   let agent;
@@ -39,7 +52,12 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
 
     // Create TACo-specific viem client for the Agent
     agentTacoClient = createPublicClient({
-      chain: polygonAmoy,
+      chain: {
+        id: Number(TACO_CHAIN_ID),
+        rpcUrls: {
+          default: { http: [TACO_CHAIN_RPC_URL] },
+        },
+      },
       transport: http(),
     });
 
@@ -59,28 +77,28 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
       viemAccount: privateKeyToAccount(process.env.PRIVATE_KEY),
       pimlicoAPIKey: process.env.PIMLICO_API_KEY,
       storageProvider,
-      dataAccessProvider: tacoProvider,
+      accessControlProvider: tacoProvider,
     });
 
     // Setup storage with namespace
     await agent.setupStorage("taco-test");
   });
 
-  describe("Agent DataAccessProvider Configuration", function () {
-    it("should initialize DataAccessProvider when provider is provided", function () {
-      expect(agent.dataAccessProvider).to.exist;
+  describe("Agent AccessControlProvider Configuration", function () {
+    it("should initialize AccessControlProvider when provider is provided", function () {
+      expect(agent.accessControlProvider).to.exist;
     });
 
-    it("should handle missing data access provider configuration gracefully", function () {
+    it("should handle missing access control provider configuration gracefully", function () {
       const agentWithoutProvider = new Agent({
         chain: AGENT_CHAIN,
         viemAccount: privateKeyToAccount(process.env.PRIVATE_KEY),
         pimlicoAPIKey: process.env.PIMLICO_API_KEY,
         storageProvider,
-        // No tacoConfig or dataAccessProvider configuration
+        // No tacoConfig or accessControlProvider configuration
       });
 
-      expect(agentWithoutProvider.dataAccessProvider).to.be.undefined;
+      expect(agentWithoutProvider.accessControlProvider).to.be.undefined;
     });
 
     it("should validate TacoAccessProvider configuration", async function () {
@@ -96,7 +114,7 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
   });
 
   describe("Agent File Operations with TACo", function () {
-    it("should create public files when no accessConditions are provided", async function () {
+    it("should create public files when no access condition is provided", async function () {
       const result = await agent.create("This is a public test file");
 
       expect(result).to.have.property("fileId");
@@ -106,7 +124,7 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
       await agent.delete(result.fileId);
     });
 
-    it("should create encrypted files when accessConditions are provided", async function () {
+    it("should create encrypted files when access condition is provided", async function () {
       // Log chain configuration for encryption test
       const agentChainId = await agent.publicClient.getChainId();
       console.log(`🔍 Encryption Test Configuration:`);
@@ -114,22 +132,9 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
       console.log(`   TACo Chain ID: ${TACO_CHAIN_ID}`);
       console.log(`   TACo Domain: ${TACO_DOMAIN}`);
 
-      // Use loaded TACo conditions (from require)
-
-      // Create a native TACo RPC condition (simple balance check)
-      const accessConditions = new conditions.base.rpc.RpcCondition({
-        chain: TACO_CHAIN_ID,
-        method: "eth_getBalance",
-        parameters: [":userAddress", "latest"],
-        returnValueTest: {
-          comparator: ">=",
-          value: 0, // Any balance
-        },
-      });
-
       const result = await agent.create("This is an encrypted test file", {
-        dataAccessConfig: {
-          accessCondition: accessConditions,
+        accessControlConfig: {
+          accessCondition: permissiveAccessCondition,
           authSigner: agent.viemAccount, // Pass authSigner for TACo encryption
         },
       });
@@ -166,53 +171,43 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
 
     it("should download and decrypt encrypted file content", async function () {
       // Create encrypted file
-      const accessCondition = new conditions.base.rpc.RpcCondition({
-        chain: TACO_CHAIN_ID,
-        method: "eth_getBalance",
-        parameters: [":userAddress", "latest"],
-        returnValueTest: {
-          comparator: ">=",
-          value: 0, // Any balance
-        },
-      });
-
       const encryptedFile = await agent.create("Secret encrypted content", {
-        dataAccessConfig: {
-          accessCondition,
+        accessControlConfig: {
+          accessCondition: permissiveAccessCondition,
           authSigner: agent.viemAccount, // Pass authSigner for TACo encryption
         },
       });
 
       expect(encryptedFile).to.have.property("encrypted", true);
 
-      // Download and decrypt
-      // Get file info to retrieve contentIpfsHash
+      // Get file info to retrieve contentIpfsHash and metadata
       const fileInfo = await agent.getFileInfo(encryptedFile.fileId);
-      const data = await agent.storageProvider.download(
-        fileInfo.contentIpfsHash,
-        {
-          binary: true,
+
+      // Read decryption context parameters from metadata
+      const requestedContextParameters =
+        fileInfo.metadata.accessControlConfig.requestedContextParameters;
+
+      // In code, there will be one parameter: `:userAddress` that needs to be provided by the user.
+      // But the code below is generic to handle any number of parameters.
+      const contextParamsAndAuthProviders = requestedContextParameters.map(
+        (parameter) => {
+          return {
+            contextParam: parameter,
+            provider: new EIP4361AuthProvider(
+              agent.publicClient,
+              agent.viemAccount
+            ),
+          };
         }
       );
-      // Create condition context with auth provider
-      const messageKit = ThresholdMessageKit.fromBytes(data);
-      const conditionContext =
-        conditions.context.ConditionContext.fromMessageKit(messageKit);
-      const authProvider = new EIP4361AuthProvider(
-        agent.publicClient,
-        agent.viemAccount
-      );
-      conditionContext.addAuthProvider(":userAddress", authProvider);
 
-      const fileContent = await agent.getFile(encryptedFile.fileId, {
-        dataAccessConfig: {
-          conditionContext,
+      const fileContent = await agent.getFile(fileInfo, {
+        accessControlConfig: {
+          contextParamsAndAuthProviders,
         },
       });
 
       expect(fileContent).to.have.property("content");
-      // Content for decrypted files is returned as a plain string by Agent.getFile.
-      // For backward compatibility, also support the object-with-`data` shape if present.
       const decryptedText = fileContent.content;
       expect(decryptedText).to.include("Secret encrypted content");
       expect(fileContent).to.have.property("wasEncrypted", true);
@@ -221,58 +216,56 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
       await agent.delete(encryptedFile.fileId);
     });
 
-    it("should support custom conditionContext in getFile", async function () {
-      const accessCondition = new conditions.base.rpc.RpcCondition({
-        chain: TACO_CHAIN_ID,
-        method: "eth_getBalance",
-        parameters: [":userAddress", "latest"],
-        returnValueTest: {
-          comparator: ">=",
-          value: 0, // Any balance
-        },
-      });
-
-      const encryptedFile = await agent.create("Content with custom context", {
-        dataAccessConfig: {
-          accessCondition,
-          authSigner: agent.viemAccount, // Pass authSigner for TACo encryption
-        },
-      });
+    it("should decrypt with contextParamsAndAuthProviders", async function () {
+      const encryptedFile = await agent.create(
+        "Content with contextParamsAndAuthProviders",
+        {
+          accessControlConfig: {
+            accessCondition: permissiveAccessCondition,
+            authSigner: agent.viemAccount, // Pass authSigner for TACo encryption
+          },
+        }
+      );
 
       expect(encryptedFile).to.have.property("encrypted", true);
 
-      // Test with proper conditionContext
-      const fileInfo = await agent.getFileInfo(encryptedFile.fileId);
-      const messageKit = ThresholdMessageKit.fromBytes(
-        await agent.storageProvider.download(fileInfo.contentIpfsHash, {
-          binary: true,
-        })
-      );
-      const conditionContext =
-        conditions.context.ConditionContext.fromMessageKit(messageKit);
+      // Test with contextParamsAndAuthProviders array API
       const authProvider = new EIP4361AuthProvider(
         agent.publicClient,
         agent.viemAccount
       );
-      conditionContext.addAuthProvider(":userAddress", authProvider);
 
       const fileContent1 = await agent.getFile(encryptedFile.fileId, {
-        dataAccessConfig: {
-          conditionContext,
+        accessControlConfig: {
+          contextParamsAndAuthProviders: [
+            {
+              provider: authProvider,
+              contextParam: ":userAddress",
+            },
+          ],
         },
       });
       expect(fileContent1).to.have.property("content");
-      expect(fileContent1.content).to.include("Content with custom context");
+      expect(fileContent1.content).to.include(
+        "Content with contextParamsAndAuthProviders"
+      );
       expect(fileContent1).to.have.property("wasEncrypted", true);
 
-      // Test with same conditionContext (should behave the same)
+      // Test with same contextParamsAndAuthProviders (should behave the same)
       const fileContent2 = await agent.getFile(encryptedFile.fileId, {
-        dataAccessConfig: {
-          conditionContext,
+        accessControlConfig: {
+          contextParamsAndAuthProviders: [
+            {
+              provider: authProvider,
+              contextParam: ":userAddress",
+            },
+          ],
         },
       });
       expect(fileContent2).to.have.property("content");
-      expect(fileContent2.content).to.include("Content with custom context");
+      expect(fileContent2.content).to.include(
+        "Content with contextParamsAndAuthProviders"
+      );
       expect(fileContent2).to.have.property("wasEncrypted", true);
 
       // Delete file
@@ -280,20 +273,10 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
     });
 
     it("should handle encrypted file lifecycle (create, update, delete)", async function () {
-      const accessCondition = new conditions.base.rpc.RpcCondition({
-        chain: TACO_CHAIN_ID,
-        method: "eth_getBalance",
-        parameters: [":userAddress", "latest"],
-        returnValueTest: {
-          comparator: ">=",
-          value: 0, // Any balance
-        },
-      });
-
       // Create encrypted file
       const encryptedFile = await agent.create("Original encrypted content", {
-        dataAccessConfig: {
-          accessCondition,
+        accessControlConfig: {
+          accessCondition: permissiveAccessCondition,
           authSigner: agent.viemAccount, // Pass authSigner for TACo encryption
         },
       });
@@ -302,23 +285,19 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
       expect(encryptedFile).to.have.property("fileId");
 
       // Verify initial encrypted content can be decrypted
-      const fileInfo = await agent.getFileInfo(encryptedFile.fileId);
-      const messageKit = ThresholdMessageKit.fromBytes(
-        await agent.storageProvider.download(fileInfo.contentIpfsHash, {
-          binary: true,
-        })
-      );
-      const conditionContext =
-        conditions.context.ConditionContext.fromMessageKit(messageKit);
       const authProvider = new EIP4361AuthProvider(
         agent.publicClient,
         agent.viemAccount
       );
-      conditionContext.addAuthProvider(":userAddress", authProvider);
 
       const initialContent = await agent.getFile(encryptedFile.fileId, {
-        dataAccessConfig: {
-          conditionContext,
+        accessControlConfig: {
+          contextParamsAndAuthProviders: [
+            {
+              provider: authProvider,
+              contextParam: ":userAddress",
+            },
+          ],
         },
       });
       expect(initialContent.content).to.include("Original encrypted content");
@@ -348,21 +327,14 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
       const initialContent = await agent.getFile(publicFile.fileId);
       expect(initialContent.content).to.include("Initial public content");
 
-      const accessCondition = new conditions.base.rpc.RpcCondition({
-        chain: TACO_CHAIN_ID,
-        method: "eth_getBalance",
-        parameters: [":userAddress", "latest"],
-        returnValueTest: {
-          comparator: ">=",
-          value: 0, // Any balance
-        },
-      });
-
       // Update with encryption
       const updateResult = await agent.update(
         publicFile.fileId,
         "Now encrypted content",
-        { accessCondition, authSigner: agent.viemAccount }
+        {
+          accessCondition: permissiveAccessCondition,
+          authSigner: agent.viemAccount,
+        }
       );
       expect(updateResult).to.have.property("hash");
 
@@ -371,23 +343,19 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
     });
 
     it("should handle different access condition types", async function () {
-      // Test with contract condition
-      const contractCondition = new conditions.base.contract.ContractCondition({
-        chain: TACO_CHAIN_ID,
+      const contractCondition = new conditions.predefined.erc721.ERC721Balance({
         contractAddress: "0x1234567890123456789012345678901234567890",
-        method: "balanceOf",
-        parameters: [":userAddress"],
+        chain: SEPOLIA_CHAIN_ID,
         returnValueTest: {
           comparator: ">=",
           value: 1,
         },
-        standardContractType: "ERC721",
       });
 
       const fileWithContractCondition = await agent.create(
         "Contract condition file",
         {
-          dataAccessConfig: {
+          accessControlConfig: {
             accessCondition: contractCondition,
             authSigner: agent.viemAccount, // Pass authSigner for TACo encryption
           },
@@ -402,8 +370,7 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
 
       // Test with time condition
       const timeCondition = new conditions.base.time.TimeCondition({
-        chain: TACO_CHAIN_ID,
-        method: "blocktime",
+        chain: SEPOLIA_CHAIN_ID,
         returnValueTest: {
           comparator: "<=",
           value: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
@@ -411,7 +378,7 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
       });
 
       const fileWithTimeCondition = await agent.create("Time condition file", {
-        dataAccessConfig: {
+        accessControlConfig: {
           accessCondition: timeCondition,
           authSigner: agent.viemAccount, // Pass authSigner for TACo encryption
         },
@@ -429,9 +396,9 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
     it("should throw error when trying to decrypt without access", async function () {
       // Create encrypted file with restrictive condition
       const restrictiveCondition = new conditions.base.rpc.RpcCondition({
-        chain: TACO_CHAIN_ID,
+        chain: SEPOLIA_CHAIN_ID,
         method: "eth_getBalance",
-        parameters: [":userAddress", "latest"],
+        parameters: [":userAddress"],
         returnValueTest: {
           comparator: ">=",
           value: "999999999999999999999999", // Impossible balance
@@ -439,7 +406,7 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
       });
 
       const encryptedFile = await agent.create("Restricted content", {
-        dataAccessConfig: {
+        accessControlConfig: {
           accessCondition: restrictiveCondition,
           authSigner: agent.viemAccount, // Pass authSigner for TACo encryption
         },
@@ -447,9 +414,23 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
 
       expect(encryptedFile).to.have.property("encrypted", true);
 
-      // Attempt to decrypt should handle gracefully
+      // Attempt to decrypt with proper contextParamsAndAuthProviders but restrictive condition
+      const authProvider = new EIP4361AuthProvider(
+        agent.publicClient,
+        agent.viemAccount
+      );
+
       try {
-        await agent.getFile(encryptedFile.fileId);
+        await agent.getFile(encryptedFile.fileId, {
+          accessControlConfig: {
+            contextParamsAndAuthProviders: [
+              {
+                provider: authProvider,
+                contextParam: ":userAddress",
+              },
+            ],
+          },
+        });
         // If no error is thrown, the test should pass
         // (TACo may handle conditions differently in test environment)
       } catch (error) {
@@ -465,7 +446,7 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
     it("should handle invalid access conditions gracefully", async function () {
       try {
         await agent.create("Test content", {
-          dataAccessConfig: {
+          accessControlConfig: {
             accessCondition: null, // Invalid condition
             authSigner: agent.viemAccount,
           },
@@ -485,19 +466,9 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
         },
       };
 
-      const accessCondition = new conditions.base.rpc.RpcCondition({
-        chain: TACO_CHAIN_ID,
-        method: "eth_getBalance",
-        parameters: [":userAddress", "latest"],
-        returnValueTest: {
-          comparator: ">=",
-          value: 0, // Any balance
-        },
-      });
-
       const encryptedFile = await agent.create(JSON.stringify(jsonContent), {
-        dataAccessConfig: {
-          accessCondition,
+        accessControlConfig: {
+          accessCondition: permissiveAccessCondition,
           authSigner: agent.viemAccount, // Pass authSigner for TACo encryption
         },
       });
@@ -505,23 +476,19 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
       expect(encryptedFile).to.have.property("encrypted", true);
 
       // Download and decrypt JSON
-      const fileInfo = await agent.getFileInfo(encryptedFile.fileId);
-      const messageKit = ThresholdMessageKit.fromBytes(
-        await agent.storageProvider.download(fileInfo.contentIpfsHash, {
-          binary: true,
-        })
-      );
-      const conditionContext =
-        conditions.context.ConditionContext.fromMessageKit(messageKit);
       const authProvider = new EIP4361AuthProvider(
         agent.publicClient,
         agent.viemAccount
       );
-      conditionContext.addAuthProvider(":userAddress", authProvider);
 
       const fileContent = await agent.getFile(encryptedFile.fileId, {
-        dataAccessConfig: {
-          conditionContext,
+        accessControlConfig: {
+          contextParamsAndAuthProviders: [
+            {
+              provider: authProvider,
+              contextParam: ":userAddress",
+            },
+          ],
         },
       });
       const decryptedJson = JSON.parse(fileContent.content);
@@ -537,7 +504,7 @@ describe("Agent with TACo DataAccessProvider: configuration, encrypted file life
 });
 
 // Separate test suite for when TACo is NOT available
-describe("Agent without DataAccessProvider: public file operations only and graceful rejection of encrypted operations", function () {
+describe("Agent without AccessControlProvider: public file operations only and graceful rejection of encrypted operations", function () {
   this.timeout(60000);
 
   let agentWithoutTaco;
@@ -551,19 +518,19 @@ describe("Agent without DataAccessProvider: public file operations only and grac
         process.env.PINATA_GATEWAY || "https://test-gateway.mypinata.cloud",
     });
 
-    // Initialize agent WITHOUT data access provider
+    // Initialize agent WITHOUT access control provider
     agentWithoutTaco = new Agent({
       chain: AGENT_CHAIN,
       viemAccount: privateKeyToAccount(process.env.PRIVATE_KEY),
       pimlicoAPIKey: process.env.PIMLICO_API_KEY,
       storageProvider,
-      // No dataAccessProvider
+      // No accessControlProvider
     });
 
     await agentWithoutTaco.setupStorage("no-taco-test");
   });
 
-  it("should create public files when no accessConditions are provided", async function () {
+  it("should create public files when no access condition is provided", async function () {
     const result = await agentWithoutTaco.create("This is a public test file");
 
     expect(result).to.have.property("fileId");
@@ -571,29 +538,18 @@ describe("Agent without DataAccessProvider: public file operations only and grac
     expect(result).to.have.property("hash");
   });
 
-  it("should throw error when accessCondition provided but TACo not configured", async function () {
-    // Create a mock TACo condition object (since we don't have TACo loaded in this test)
-    const accessCondition = {
-      chain: TACO_CHAIN_ID,
-      method: "eth_getBalance",
-      parameters: [":userAddress", "latest"],
-      returnValueTest: {
-        comparator: ">=",
-        value: 0,
-      },
-    };
-
+  it("should throw error when access condition is provided but TACo not configured", async function () {
     try {
       await agentWithoutTaco.create("Test with conditions but no provider", {
-        dataAccessConfig: {
-          accessCondition,
+        accessControlConfig: {
+          accessCondition: permissiveAccessCondition,
           authSigner: agentWithoutTaco.viemAccount,
         },
       });
       expect.fail("Should have thrown an error");
     } catch (error) {
       expect(error.message).to.include(
-        "Data access provider is required for encrypted files"
+        "Access control provider is required for encrypted files"
       );
     }
   });
