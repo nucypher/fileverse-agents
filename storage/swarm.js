@@ -59,15 +59,31 @@ class SwarmStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async download(reference) {
+  /**
+   * Download content from Swarm
+   * @param {string} reference - The content reference/hash
+   * @param {Object} options - Download options
+   * @param {boolean} options.binary - If true, normalizes response to Uint8Array for binary content (default: false)
+   * @returns {Promise<any|Uint8Array>} Raw data or normalized Uint8Array if binary option is true
+   */
+  async download(reference, options = {}) {
     try {
+      const { binary = false } = options;
+
       const protocol = await this.protocol();
       const strippedReference =
       typeof reference === "string"
         ? reference.replace(protocol, "")
         : reference;
       const result = await this.bee.downloadFile(strippedReference);
-      return result;
+
+      // Return raw data if not requesting binary normalization
+      if (!binary) {
+        return result;
+      }
+
+      // Use parent class method for binary normalization
+      return this._normalizeToBinary(result);
     } catch (error) {
       console.error("Error downloading from Swarm:", error);
       throw error;
