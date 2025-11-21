@@ -20,7 +20,32 @@ class PinataStorageProvider extends BaseStorageProvider {
   async upload(fileName, content) {
     try {
       const protocol = await this.protocol();
-      const file = new File([content], fileName, { type: "text/plain" });
+      // Determine correct MIME type and normalize content for upload
+      let fileType;
+      let fileContent;
+
+      if (content instanceof ArrayBuffer) {
+        // Normalize binary content to Uint8Array and set proper content type
+        fileType = "application/octet-stream";
+        fileContent = new Uint8Array(content);
+      } else if (ArrayBuffer.isView(content)) {
+        // Covers Uint8Array, Buffer, etc.
+        fileType = "application/octet-stream";
+        fileContent = new Uint8Array(
+          content.buffer,
+          content.byteOffset ?? 0,
+          content.byteLength
+        );
+      } else if (content != null && typeof content === "object") {
+        // Fallback: JSON serialize unknown objects
+        fileType = "application/json";
+        fileContent = JSON.stringify(content);
+      } else {
+        fileType = "text/plain";
+        fileContent = content;
+      }
+
+      const file = new File([fileContent], fileName, { type: fileType });
       const result = await this.pinata.upload.public.file(file);
       return `${protocol}${result.cid}`;
     } catch (error) {
@@ -81,14 +106,32 @@ class PinataStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async download(reference) {
+  /**
+   * Download content from Pinata gateway
+   * @param {string} reference - The content reference/CID
+   * @param {Object} options - Download options
+   * @param {boolean} options.binary - If true, normalizes response to Uint8Array for binary content (default: false)
+   * @returns {Promise<any|Uint8Array>} Raw data or normalized Uint8Array if binary option is true
+   */
+  async download(reference, options = {}) {
+    const { binary = false } = options;
+
     const protocol = await this.protocol();
     const strippedReference =
       typeof reference === "string"
         ? reference.replace(protocol, "")
         : reference;
+
     const result = await this.pinata.gateways.public.get(strippedReference);
-    return result?.data;
+    let data = result?.data || result;
+
+    // Return raw data if not requesting binary normalization
+    if (!binary) {
+      return data;
+    }
+
+    // Use parent class method for binary normalization
+    return this._normalizeToBinary(data);
   }
 
   async isConnected() {
