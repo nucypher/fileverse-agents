@@ -231,7 +231,7 @@ class Agent {
    * const result = await agent.create('Hello World');
    *
    * @example
-   * // Create encrypted file with time-based access condition (while using TACo as the access control provider)
+   * // Create encrypted file with time-based access conditions, using TACo as the Access Control Provider
    * const result = await agent.create('Secret content', {
    *   accessControlConfig: {
    *     accessCondition: {
@@ -260,7 +260,7 @@ class Agent {
     ) {
       if (!this.accessControlProvider) {
         throw new Error(
-          `Access control provider is required for encrypted files. Please provide an accessControlProvider in the Agent constructor.`
+          `Access Control Provider is required to encrypt and share files. Please provide an accessControlProvider in the Agent constructor.`
         );
       }
 
@@ -281,7 +281,7 @@ class Agent {
       filename = "output.md";
     }
 
-    // Upload content (either original or encrypted)
+    // Upload content (either plaintext or encrypted)
     const contentIpfsHash = await this.uploadToStorage(
       filename,
       contentToUpload

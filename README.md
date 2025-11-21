@@ -52,8 +52,7 @@ await agent.setupStorage('my-namespace'); // file is generated as the creds/${na
 const latestBlockNumber = await agent.getBlockNumber();
 console.log(`Latest block number: ${latestBlockNumber}`);
 
-// Note: Files created with this basic setup are stored without encryption.
-// To add encryption and access control, see the "Access Control Providers" section.
+// Note: Files are unencrypted by default. To encrypt files and specify access conditions, refer to the Access Control Providers section below
 
 // create a new file
 const file = await agent.create('Hello World');
@@ -106,20 +105,20 @@ const storageProvider = new SwarmStorageProvider({
 
 ## Access Control Providers
 
-Access Control Providers add an additional layer of control over who can access your agent's files beyond basic storage permissions.
+Access Control Providers protect sensitive data/files generated or consumed by agents, and enforce sharing policy logic – governing which entities are able to decrypt said data, and on what basis. 
 
 ### TACo (Threshold Access Control)
 
-TACo enables encryption with programmable access control. Files are encrypted client-side and can only be decrypted by users or agents that meet the encryptor's specified conditions. Learn more at [taco.build](https://taco.build/) or in the [TACo documentation](https://docs.taco.build/).
+TACo (Threshold Access Control) is a decentralized cryptographic infrastructure layer that provides end-to-end encryption and programmable access control. Files are encrypted client-side and are exclusively decryptable by end-users/agents that satisfy the encryptor's pre-specified access conditions. Learn more at [taco.build](https://taco.build/) and in TACo's [documentation](https://docs.taco.build/).
 
 #### Supported Access Conditions
 
-- **Time-based**: Grant access after a specific timestamp
-- **Token balance**: Require minimum token holdings (ERC-20)
-- **NFT ownership**: Restrict to holders of specific NFTs (ERC-721)
-- **Custom RPC conditions**: Implement complex blockchain-based logic
-- **Compound conditions**: Combine multiple conditions with AND/OR operators
-- **And more**: See the [TACo Conditions documentation](https://docs.taco.build/for-developers/references/conditions) for the complete list
+- **Time-based**: Grant access after or until a specific timestamp
+- **Token balance**: Grant access based on minimum or maximum token holdings (ERC-20) in the requestor's wallet 
+- **NFT holding**: Grant access to current holders of custom NFTs (ERC-721)
+- **Custom RPC**: Grant access based on on-chain and off-chain state via calls virtually any JSON-RPC endpoint 
+- **Compound conditions**: Grant access based on a logical composition of conditions and condition types (e.g. with AND/OR operators) 
+- **Advanced conditionality**: Grant access based on sequential calls, IfThenElse logic and more – see TACo's [conditions documentation](https://docs.taco.build/for-developers/references/conditions)
 
 #### Usage Example
 
@@ -233,7 +232,7 @@ console.log(`File deleted: ${deletedFile}`);
 
 #### Configuration & Setup
 
-**Networks**: TACo operations run on Polygon networks (Amoy for testnet, Mainnet for production), but access conditions can be evaluated on any supported blockchain (Ethereum, Sepolia, etc.).
+**Networks**: TACo operations run on Polygon networks (testnet: Amoy, production: Polygon Mainnet). Access conditions can be evaluated and (in)validated on any supported blockchain or L2 (Ethereum, Sepolia, etc.).
 
 **Getting Started**: See the [TACo documentation](https://docs.taco.build/for-developers/get-started-with-tac) for supported domains, ritual IDs, and network details.
 
