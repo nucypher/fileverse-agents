@@ -4,12 +4,15 @@ import {
   SwarmStorageProvider,
   BaseStorageProvider,
 } from "./storage/index.js";
+import { AccessControlProvider, TacoAccessProvider } from "./access-control/index.js";
 
 export {
   Agent,
   PinataStorageProvider,
   SwarmStorageProvider,
   BaseStorageProvider,
+  AccessControlProvider,
+  TacoAccessProvider,
 };
 
 export default {
@@ -17,4 +20,6 @@ export default {
   BaseStorageProvider,
   PinataStorageProvider,
   SwarmStorageProvider,
+  AccessControlProvider,
+  TacoAccessProvider,
 };
