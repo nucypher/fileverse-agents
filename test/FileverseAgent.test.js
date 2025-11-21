@@ -39,6 +39,7 @@ describe('FileverseAgent', () => {
     expect(agent.create).to.be.a('function');
     expect(agent.update).to.be.a('function');
     expect(agent.delete).to.be.a('function');
+    expect(agent.getFileInfo).to.be.a('function');
     expect(agent.getFile).to.be.a('function');
   });
   it('should perform full file lifecycle (create, update, delete)', async function () {
